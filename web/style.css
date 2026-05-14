@@ -215,7 +215,7 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 }
 
 .user-form-row { display: flex; flex-direction: column; gap: 10px; }
-.user-form-row .form-group { width: 100%; }
+.user-form-row .form-group { width: 100%; flex: 0 0 auto; }
 .user-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .user-form-actions .btn { margin-top: 6px; }
 
