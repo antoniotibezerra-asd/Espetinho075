@@ -709,7 +709,10 @@ const server = http.createServer((req, res) => {
         res.end('Server Error: ' + error.code);
       }
     } else {
-      res.writeHead(200, { 'Content-Type': contentType });
+      const cacheControl = (extname === '.png' || extname === '.jpg' || extname === '.jpeg' || extname === '.webp' || extname === '.gif')
+        ? 'public, max-age=86400'
+        : 'no-store';
+      res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': cacheControl });
       res.end(content, 'utf-8');
     }
   });
