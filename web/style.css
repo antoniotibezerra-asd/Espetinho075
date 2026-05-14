@@ -205,12 +205,20 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 
 /* ── Formulário ── */
 .form-card { display: flex; flex-direction: column; gap: 14px; }
+.form-card .row { flex-wrap: wrap; align-items: flex-end; }
 .form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.form-card .row .form-group { flex: 1 1 180px; min-width: 180px; }
 .form-group label { font-size: 12px; font-weight: 600; color: #666; }
 .form-card input, .form-card select {
   width: 100%; padding: 8px 10px; border: var(--border);
   border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font);
 }
+
+.user-form-row { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)) auto; gap: 8px; align-items: end; }
+.user-form-row .form-group { min-width: 0; }
+.user-form-row .form-group label { min-height: 32px; }
+.user-form-row .btn { margin-top: 20px; justify-self: end; }
+.user-form-row #btn-usuario-cancel { justify-self: start; }
 
 /* ── Cardápio lista ── */
 .cat-label {
@@ -265,7 +273,7 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 }
 .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
 .modal-body { display: flex; flex-direction: column; gap: 16px; }
-.modal-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.modal-row { display: flex; align-items: center; justify-content: flex-start; gap: 12px; }
 .modal-row label { font-size: 13px; color: #666; }
 .modal-row select { padding: 6px 10px; border: var(--border); border-radius: var(--radius-sm); font-family: var(--font); }
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
@@ -322,4 +330,6 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
   .two-col { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
   .mesa-lista { grid-template-columns: repeat(4, 1fr); }
+  .user-form-row { grid-template-columns: 1fr 1fr; }
+  .user-form-row .btn { width: 100%; justify-self: stretch; margin-top: 0; grid-column: 1 / -1; }
 }
