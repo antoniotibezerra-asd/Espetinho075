@@ -28,14 +28,14 @@
       <span class="logo">Espetinho 075</span>
     </div>
     <nav class="nav" id="nav">
-      <button class="nav-btn active" data-tab="pedidos">Pedidos</button>
-      <button class="nav-btn" data-tab="cardapio">Cardápio</button>
-      <button class="nav-btn" data-tab="producao">Produção</button>
-      <button class="nav-btn" data-tab="cadastros">Cadastros</button>
-      <button class="nav-btn" data-tab="parametros">Parâmetros</button>
-      <button class="nav-btn" data-tab="relatorios">Relatórios</button>
-      <button class="nav-btn" data-tab="caixa">Caixa</button>
-      <button class="nav-btn" data-tab="estoque">Estoque</button>
+      <button class="nav-btn active" data-tab="pedidos"><span class="nav-icon">🍺</span><span class="nav-label">Pedidos</span></button>
+      <button class="nav-btn" data-tab="cardapio"><span class="nav-icon">📋</span><span class="nav-label">Cardápio</span></button>
+      <button class="nav-btn" data-tab="producao"><span class="nav-icon">🍳</span><span class="nav-label">Produção</span></button>
+      <button class="nav-btn" data-tab="cadastros"><span class="nav-icon">🗂️</span><span class="nav-label">Cadastros</span></button>
+      <button class="nav-btn" data-tab="parametros"><span class="nav-icon">⚙️</span><span class="nav-label">Parâmetros</span></button>
+      <button class="nav-btn" data-tab="relatorios"><span class="nav-icon">📈</span><span class="nav-label">Relatórios</span></button>
+      <button class="nav-btn" data-tab="caixa"><span class="nav-icon">💰</span><span class="nav-label">Caixa</span></button>
+      <button class="nav-btn" data-tab="estoque"><span class="nav-icon">📦</span><span class="nav-label">Estoque</span></button>
     </nav>
     <div class="spacer"></div>
     <div class="user-badge" id="user-badge" onclick="app.abrirModalUsuario()">
@@ -360,7 +360,7 @@
         <div>
           <h2>Usuários</h2>
           <div class="card form-card">
-            <div class="row user-form-row">
+            <div class="user-form-row">
               <div class="form-group">
                 <label>Nome</label>
                 <input id="f-usuario-nome" type="text" placeholder="Ex: João" />
@@ -387,10 +387,12 @@
                 <label>Máx Desconto (R$)</label>
                 <input id="f-usuario-desc-val" type="number" placeholder="0.00" min="0" step="0.01" />
               </div>
-              <button class="btn btn-primary" style="margin-top:20px" onclick="app.addUsuario()">
-                <span id="btn-usuario-text">Adicionar</span>
-              </button>
-              <button class="btn" id="btn-usuario-cancel" style="display:none;margin-top:20px" onclick="app.cancelarEdicaoUsuario()">Cancelar</button>
+              <div class="user-form-actions">
+                <button class="btn btn-primary" onclick="app.addUsuario()">
+                  <span id="btn-usuario-text">Adicionar</span>
+                </button>
+                <button class="btn" id="btn-usuario-cancel" style="display:none" onclick="app.cancelarEdicaoUsuario()">Cancelar</button>
+              </div>
             </div>
             <div id="lista-usuarios" class="simple-list"></div>
           </div>

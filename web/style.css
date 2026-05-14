@@ -72,6 +72,8 @@ body {
 }
 .nav-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 .nav-btn:hover:not(.active) { background: var(--gray-light); }
+.nav-icon { display: none; }
+.nav-label { display: inline; }
 
 /* ── Layout ── */
 .main { padding: 24px; max-width: 1100px; margin: 0 auto; }
@@ -329,10 +331,46 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 .ticket-divider { border-bottom: 1px dashed #000; margin: 5px 0; }
 
 @media (max-width: 980px) {
+  body { background-attachment: scroll, scroll, scroll, scroll, scroll, scroll; }
   .topbar { flex-wrap: wrap; gap: 10px; padding: 10px 12px; }
-  .nav { overflow-x: auto; white-space: nowrap; padding-bottom: 6px; }
-  .nav-btn { flex: 0 0 auto; }
-  .main { padding: 12px; }
+  .logo-container { display: none; }
+  .spacer { display: none; }
+  .user-badge { width: 100%; justify-content: space-between; border: var(--border); background: #fff8ef; }
+  .nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    background: var(--paper);
+    border-top: 1px solid #D8C3A5;
+    box-shadow: 0 -6px 18px rgba(43, 29, 14, 0.06);
+    padding-top: 6px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+    gap: 0;
+    justify-content: space-around;
+  }
+  .nav-btn {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 6px 6px;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .nav-btn.active {
+    background: transparent;
+    border-color: transparent;
+    color: var(--primary-2);
+  }
+  .nav-btn:hover:not(.active) { background: transparent; }
+  .nav-icon { display: block; font-size: 20px; line-height: 1; }
+  .nav-label { display: block; font-size: 11px; font-weight: 600; color: #7B6A5B; }
+  .nav-btn.active .nav-label { color: #2B1D0E; font-weight: 900; }
+  .main { padding: 12px; padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
   .two-col { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
   .mesa-lista { grid-template-columns: repeat(4, 1fr); }
