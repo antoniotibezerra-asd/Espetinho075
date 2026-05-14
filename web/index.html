@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Espetinho 075 - Gerenciador</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid #d8c3a5;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="logo-container">
+      <img src="assets/logo.jpg" alt="Logo" class="logo-img" onerror="this.style.display='none'">
+      <span class="logo">Espetinho 075</span>
+    </div>
+    <nav class="nav" id="nav">
+      <button class="nav-btn active" data-tab="pedidos">Pedidos</button>
+      <button class="nav-btn" data-tab="cardapio">Cardápio</button>
+      <button class="nav-btn" data-tab="producao">Produção</button>
+      <button class="nav-btn" data-tab="cadastros">Cadastros</button>
+      <button class="nav-btn" data-tab="parametros">Parâmetros</button>
+      <button class="nav-btn" data-tab="relatorios">Relatórios</button>
+      <button class="nav-btn" data-tab="caixa">Caixa</button>
+      <button class="nav-btn" data-tab="estoque">Estoque</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="user-badge" id="user-badge" onclick="app.abrirModalUsuario()">
+      <span id="user-name">Gerente</span>
+      <span class="badge badge-blue" id="user-role" style="font-size:9px">GERENTE</span>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- ── PEDIDOS ──────────────────────────────────────────────── -->
+    <section id="tab-pedidos" class="tab active">
+      <div class="two-col">
+        <div id="mesa-grid-container">
+          <div class="row" style="margin-bottom:12px">
+            <h2 style="margin:0">Mesas e Pedidos</h2>
+            <div class="spacer"></div>
+            <button class="btn btn-sm" onclick="app.abrirPedidosFechados()">Pedidos Fechados</button>
+          </div>
+          <div class="mesa-grid" id="mesa-grid"></div>
+          <div class="legend">
+            <span class="badge badge-amber">Ocupada</span>
+            <span class="badge badge-green">Com Total</span>
+            <span class="badge badge-gray">Livre</span>
+          </div>
+        </div>
+        <div>
+          <div class="card" id="comanda-card">
+            <div class="comanda-header">
+              <h2 id="comanda-title">Selecione uma mesa</h2>
+              <button class="btn btn-danger" id="btn-fechar" style="display:none" onclick="app.fecharMesaModal()">
+                Fechar · <span id="btn-fechar-total"></span>
+              </button>
+            </div>
+            <div id="comanda-body">
+              <p class="empty-msg">Clique em uma mesa para gerenciar pedidos.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── CARDÁPIO ─────────────────────────────────────────────── -->
+    <section id="tab-cardapio" class="tab">
+      <div class="row" style="margin-bottom:12px">
+        <h2>Itens do Cardápio</h2>
+        <span class="badge badge-blue" id="qtd-prod"></span>
+      </div>
+      <div class="card scroll" id="lista-cardapio"></div>
+    </section>
+
+    <!-- ── PRODUÇÃO (COZINHA/CHURRASCO) ────────────────────────── -->
+    <section id="tab-producao" class="tab">
+      <div class="two-col">
+        <div>
+          <h2>Fila de Produção (FIFO)</h2>
+          <div class="card scroll" id="lista-producao"></div>
+        </div>
+        <div>
+          <h2>Legenda de Setores</h2>
+          <div class="card">
+            <div class="simple-list">
+              <div class="simple-item">
+                <span>🍢 Churrasco (Petiscos)</span>
+                <span class="badge badge-red">URGENTE</span>
+              </div>
+              <div class="simple-item">
+                <span>🍳 Cozinha (Pratos/Sobremesas)</span>
+                <span class="badge badge-amber">NORMAL</span>
+              </div>
+              <div class="simple-item">
+                <span>🍺 Bar (Bebidas)</span>
+                <span class="badge badge-blue">IMEDIATO</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── CADASTROS ────────────────────────────────────────────── -->
+    <section id="tab-cadastros" class="tab">
+      <div class="two-col">
+        <div>
+          <h2 id="form-cardapio-titulo">Cadastro de Produto</h2>
+          <div class="card form-card">
+            <div class="form-group">
+              <label>Nome do Produto</label>
+              <input id="f-nome" type="text" placeholder="Ex: Cerveja 600ml" />
+            </div>
+            <div class="form-group">
+              <label>Imagem (URL)</label>
+              <input id="f-imagem" type="url" placeholder="https://..." />
+            </div>
+            <div class="row" style="gap:8px">
+              <div class="form-group">
+                <label>Upload de imagem</label>
+                <input id="f-imagem-file" type="file" accept="image/*" />
+              </div>
+              <button class="btn btn-primary" style="margin-top:20px" onclick="app.uploadImagemProduto()">Enviar</button>
+            </div>
+            <div class="row">
+              <div class="form-group">
+                <label>Categoria</label>
+                <select id="f-cat"></select>
+              </div>
+              <div class="form-group">
+                <label>Subcategoria</label>
+                <select id="f-subcat"></select>
+              </div>
+              <div class="form-group">
+                <label>Preço (R$)</label>
+                <input id="f-preco" type="number" placeholder="0.00" min="0" step="0.5" />
+              </div>
+            </div>
+            <div class="row">
+              <div class="form-group">
+                <label>Estoque Inicial</label>
+                <input id="f-estoque" type="number" placeholder="0" min="0" />
+              </div>
+              <div class="form-group">
+                <label>Estoque mínimo</label>
+                <input id="f-estoque-min" type="number" placeholder="5" min="0" />
+              </div>
+              <div class="row" style="flex:1; align-items: flex-end; padding-bottom: 2px;">
+                <button class="btn btn-primary" style="flex:1" onclick="app.addProduto()">
+                  <span id="btn-add-text">Adicionar</span>
+                </button>
+                <button class="btn" id="btn-cancel-edit" style="display:none" onclick="app.cancelarEdicao()">Cancelar</button>
+              </div>
+            </div>
+          </div>
+
+          <h2 style="margin-top:24px">Formas de Pagamento</h2>
+          <div class="card form-card">
+            <div class="row">
+              <div class="form-group">
+                <label>Nova Forma</label>
+                <input id="f-pagamento" type="text" placeholder="Ex: Vale Refeição" />
+              </div>
+              <button class="btn btn-primary" style="margin-top:20px" onclick="app.addPagamento()">+</button>
+            </div>
+            <div id="lista-pagamentos" class="simple-list"></div>
+          </div>
+
+          <h2 style="margin-top:24px">Categorias</h2>
+          <div class="card form-card">
+            <div class="row">
+              <div class="form-group">
+                <label>Nova Categoria</label>
+                <input id="cat-nome" type="text" placeholder="Ex: Lanches" />
+              </div>
+              <button class="btn btn-primary" style="margin-top:20px" onclick="app.addCategoria()">+</button>
+            </div>
+            <div id="lista-categorias" class="simple-list"></div>
+          </div>
+
+          <h2 style="margin-top:24px">Subcategorias</h2>
+          <div class="card form-card">
+            <div class="row">
+              <div class="form-group">
+                <label>Categoria</label>
+                <select id="subcat-cat"></select>
+              </div>
+              <div class="form-group">
+                <label>Nova Subcategoria</label>
+                <input id="subcat-nome" type="text" placeholder="Ex: Cervejas" />
+              </div>
+              <button class="btn btn-primary" style="margin-top:20px" onclick="app.addSubcategoria()">+</button>
+            </div>
+            <div id="lista-subcategorias" class="simple-list"></div>
+          </div>
+
+        </div>
+
+        <div>
+          <h2>Gerenciar Produtos</h2>
+          <div class="card scroll" id="lista-manutencao-produtos"></div>
+
+          <h2 style="margin-top:24px">Gerenciar Mesas</h2>
+          <div class="card form-card">
+            <div class="row">
+              <button class="btn" style="flex:1" onclick="app.adicionarMesa('presencial')">+ Mesa Presencial</button>
+              <button class="btn" style="flex:1" onclick="app.adicionarMesa('online')">+ Pedido Online</button>
+            </div>
+            <div id="lista-manutencao-mesas" class="simple-list" style="margin-top:12px"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── PARÂMETROS ───────────────────────────────────────────── -->
+    <section id="tab-parametros" class="tab">
+      <div class="two-col">
+        <div>
+          <h2>Configurações</h2>
+          <div class="card form-card">
+            <div class="modal-row" style="padding:6px 0">
+              <label>Permitir vender sem estoque:</label>
+              <input type="checkbox" id="check-venda-sem-estoque" />
+            </div>
+          </div>
+
+          <h2 style="margin-top:24px">Impressão</h2>
+          <div class="card form-card">
+            <div class="modal-row" style="padding:6px 0">
+              <label>Perguntar via do setor:</label>
+              <input type="checkbox" id="check-impressao-perguntar" />
+            </div>
+            <div class="modal-row" style="padding:6px 0">
+              <label>Auto imprimir via do setor:</label>
+              <input type="checkbox" id="check-impressao-auto" />
+            </div>
+            <p style="font-size:12px; color:#777; margin:10px 0 0">
+              Petisco → Churrasco, Prato/Sobremesa → Cozinha. Bebidas não geram via do setor.
+            </p>
+          </div>
+
+          <h2 style="margin-top:24px">Aparência</h2>
+          <div class="card form-card">
+            <div class="row" style="align-items:center">
+              <div class="form-group" style="flex:1">
+                <label>Opacidade do fundo (<span id="bg-opacity-val">90</span>%)</label>
+                <input id="bg-opacity" type="range" min="0" max="100" step="1" />
+              </div>
+              <button class="btn btn-primary" style="margin-top:20px" onclick="app.salvarAparencia()">Salvar</button>
+            </div>
+            <p style="font-size:12px; color:#777; margin:10px 0 0">
+              Dica: aumente para “apagar” mais o fundo e melhorar a leitura.
+            </p>
+          </div>
+
+          <h2 style="margin-top:24px">Recibo</h2>
+          <div class="card form-card">
+            <div class="row">
+              <div class="form-group">
+                <label>Telefone</label>
+                <input id="f-empresa-telefone" type="text" placeholder="(00) 00000-0000" />
+              </div>
+              <div class="form-group">
+                <label>Endereço</label>
+                <input id="f-empresa-endereco" type="text" placeholder="Rua..." />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Pix (Copia e Cola)</label>
+              <input id="f-empresa-pix" type="text" placeholder="Cole aqui o código Pix" />
+            </div>
+            <div class="form-group">
+              <label>Mensagem no rodapé do recibo</label>
+              <input id="f-empresa-rodape" type="text" placeholder="Ex: Obrigado pela preferência!" />
+            </div>
+            <button class="btn btn-primary" onclick="app.salvarEmpresa()">Salvar dados do recibo</button>
+          </div>
+
+          <h2 style="margin-top:24px">Backup</h2>
+          <div class="card form-card">
+            <div class="row">
+              <button class="btn btn-primary" style="flex:1" onclick="app.baixarBackup()">⬇️ Baixar backup</button>
+              <button class="btn" style="flex:1" onclick="app.abrirImportBackup()">⬆️ Restaurar backup</button>
+              <input id="backup-file" type="file" accept="application/json" style="display:none" />
+            </div>
+            <p style="font-size:12px; color:#777; margin:10px 0 0">
+              Use para salvar/restaurar o sistema inteiro (produtos, mesas, histórico, perfis e usuários).
+            </p>
+          </div>
+
+          <h2 style="margin-top:24px">Sincronização</h2>
+          <div class="card form-card">
+            <div class="row" style="align-items:flex-end; gap:10px">
+              <div class="form-group" style="flex:1">
+                <label>Status</label>
+                <div id="sync-status" style="font-size:12px; color:#777">—</div>
+              </div>
+              <button class="btn" onclick="app.syncBaixar()">⬇️ Baixar</button>
+              <button class="btn btn-primary" onclick="app.syncEnviar()">⬆️ Enviar</button>
+              <button class="btn" onclick="app.syncMesclarCadastros()">🧩 Mesclar cadastros</button>
+            </div>
+            <div id="sync-diff" style="margin-top:10px; font-size:12px; color:#777"></div>
+            <div id="sync-historico" class="simple-list" style="margin-top:10px"></div>
+            <div class="row" style="align-items:flex-end; gap:10px; margin-top:10px">
+              <div class="form-group" style="flex:1">
+                <label>Supabase</label>
+                <div id="supabase-status" style="font-size:12px; color:#777">—</div>
+              </div>
+              <button class="btn" onclick="app.supabaseImportCadastros()">⬇️ Importar cadastros</button>
+              <button class="btn btn-primary" onclick="app.supabaseExportCadastros()">⬆️ Exportar cadastros</button>
+            </div>
+            <p id="sync-hint" style="font-size:12px; color:#777; margin:10px 0 0">
+              Enviar/baixar usa versão e data para evitar sobrescrever alterações sem aviso.
+            </p>
+          </div>
+
+          <h2 style="margin-top:24px">Auditoria</h2>
+          <div class="card form-card">
+            <div class="row">
+              <div class="form-group" style="flex:1">
+                <label>De</label>
+                <input id="audit-de" type="date" />
+              </div>
+              <div class="form-group" style="flex:1">
+                <label>Até</label>
+                <input id="audit-ate" type="date" />
+              </div>
+              <button class="btn" style="margin-top:20px" onclick="app.exportarAuditoria()">📄 CSV</button>
+            </div>
+            <div class="row">
+              <div class="form-group" style="flex:1">
+                <label>Usuário</label>
+                <select id="audit-user"></select>
+              </div>
+              <div class="form-group" style="flex:2">
+                <label>Buscar</label>
+                <input id="audit-busca" type="text" placeholder="Ex: caixa.pagamento" />
+              </div>
+              <button class="btn btn-primary" style="margin-top:20px" onclick="app.aplicarFiltroAuditoria()">Filtrar</button>
+            </div>
+            <div id="lista-auditoria" class="simple-list"></div>
+          </div>
+        </div>
+
+        <div>
+          <h2>Usuários</h2>
+          <div class="card form-card">
+            <div class="row">
+              <div class="form-group">
+                <label>Nome</label>
+                <input id="f-usuario-nome" type="text" placeholder="Ex: João" />
+              </div>
+              <div class="form-group">
+                <label>Perfil</label>
+                <select id="f-usuario-papel">
+                  <option value="gerente">Gerente</option>
+                  <option value="garcom">Garçom</option>
+                  <option value="cozinha">Cozinha</option>
+                  <option value="churrasqueiro">Churrasqueiro</option>
+                  <option value="cliente">Cliente</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Senha (opcional)</label>
+                <input id="f-usuario-senha" type="password" placeholder="Deixe em branco para manter" />
+              </div>
+              <div class="form-group">
+                <label>Máx Desconto (%)</label>
+                <input id="f-usuario-desc-pct" type="number" placeholder="0" min="0" max="100" step="1" />
+              </div>
+              <div class="form-group">
+                <label>Máx Desconto (R$)</label>
+                <input id="f-usuario-desc-val" type="number" placeholder="0.00" min="0" step="0.01" />
+              </div>
+              <button class="btn btn-primary" style="margin-top:20px" onclick="app.addUsuario()">
+                <span id="btn-usuario-text">Adicionar</span>
+              </button>
+              <button class="btn" id="btn-usuario-cancel" style="display:none;margin-top:20px" onclick="app.cancelarEdicaoUsuario()">Cancelar</button>
+            </div>
+            <div id="lista-usuarios" class="simple-list"></div>
+          </div>
+
+          <h2 style="margin-top:24px">Perfis de Acesso</h2>
+          <div class="card form-card">
+            <div class="row">
+              <div class="form-group">
+                <label>Perfil</label>
+                <select id="perfil-papel">
+                  <option value="gerente">Gerente</option>
+                  <option value="garcom">Garçom</option>
+                  <option value="cozinha">Cozinha</option>
+                  <option value="churrasqueiro">Churrasqueiro</option>
+                  <option value="cliente">Cliente</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" style="margin-top:20px" onclick="app.salvarPerfil()">Salvar</button>
+            </div>
+            <div class="simple-list">
+              <div class="simple-item"><span>Pedidos</span><input type="checkbox" id="perfil-tab-pedidos" /></div>
+              <div class="simple-item"><span>Cardápio</span><input type="checkbox" id="perfil-tab-cardapio" /></div>
+              <div class="simple-item"><span>Produção</span><input type="checkbox" id="perfil-tab-producao" /></div>
+              <div class="simple-item"><span>Cadastros</span><input type="checkbox" id="perfil-tab-cadastros" /></div>
+              <div class="simple-item"><span>Parâmetros</span><input type="checkbox" id="perfil-tab-parametros" /></div>
+              <div class="simple-item"><span>Relatórios</span><input type="checkbox" id="perfil-tab-relatorios" /></div>
+              <div class="simple-item"><span>Caixa</span><input type="checkbox" id="perfil-tab-caixa" /></div>
+              <div class="simple-item"><span>Estoque</span><input type="checkbox" id="perfil-tab-estoque" /></div>
+            </div>
+
+            <div style="margin-top:14px; font-weight:700; font-size:13px">Ações</div>
+            <div class="simple-list" style="margin-top:6px">
+              <div class="simple-item"><span>Adicionar item</span><input type="checkbox" id="perfil-acao-adicionarItem" /></div>
+              <div class="simple-item"><span>Cancelar/remover item</span><input type="checkbox" id="perfil-acao-cancelarItem" /></div>
+              <div class="simple-item"><span>Gerenciar produtos</span><input type="checkbox" id="perfil-acao-gerenciarProdutos" /></div>
+              <div class="simple-item"><span>Gerenciar subcategorias</span><input type="checkbox" id="perfil-acao-gerenciarSubcategorias" /></div>
+              <div class="simple-item"><span>Gerenciar mesas</span><input type="checkbox" id="perfil-acao-gerenciarMesas" /></div>
+              <div class="simple-item"><span>Gerenciar pagamentos</span><input type="checkbox" id="perfil-acao-gerenciarPagamentos" /></div>
+              <div class="simple-item"><span>Editar estoque</span><input type="checkbox" id="perfil-acao-editarEstoque" /></div>
+              <div class="simple-item"><span>Receber pagamento</span><input type="checkbox" id="perfil-acao-receberPagamento" /></div>
+              <div class="simple-item"><span>Reimprimir</span><input type="checkbox" id="perfil-acao-reimprimir" /></div>
+              <div class="simple-item"><span>Ver relatórios</span><input type="checkbox" id="perfil-acao-verRelatorios" /></div>
+              <div class="simple-item"><span>Ver auditoria</span><input type="checkbox" id="perfil-acao-verAuditoria" /></div>
+              <div class="simple-item"><span>Configurar sistema</span><input type="checkbox" id="perfil-acao-configurarSistema" /></div>
+              <div class="simple-item"><span>Configurar integração</span><input type="checkbox" id="perfil-acao-configurarIntegracao" /></div>
+              <div class="simple-item"><span>Gerenciar usuários</span><input type="checkbox" id="perfil-acao-gerenciarUsuarios" /></div>
+              <div class="simple-item"><span>Gerenciar perfis</span><input type="checkbox" id="perfil-acao-gerenciarPerfis" /></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── RELATÓRIOS ───────────────────────────────────────────── -->
+    <section id="tab-relatorios" class="tab">
+      <div class="two-col">
+        <div>
+          <h2>Relatórios de Vendas</h2>
+          <div class="card">
+            <p style="font-size:13px; color:#666; margin-bottom:16px">Gere e exporte os dados de vendas para análise externa.</p>
+            <div class="simple-list">
+              <div class="simple-item">
+                <span>Vendas do Dia (Completo)</span>
+                <button class="btn btn-sm btn-primary" onclick="app.exportarRelatorio()">📊 Baixar CSV</button>
+              </div>
+              <div class="simple-item">
+                <span>Relatório de Produtos (Estoque)</span>
+                <button class="btn btn-sm" onclick="app.exportarRelatorioEstoque()">📦 Baixar CSV</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <h2>Informações</h2>
+          <div class="card">
+            <p style="font-size:13px; color:#666; line-height:1.6">
+              Os relatórios são gerados em formato <b>CSV</b>, que pode ser aberto em programas como Excel, Google Sheets ou LibreOffice.<br><br>
+              • <b>Vendas do Dia</b>: Lista cada mesa fechada, hora, subtotal, taxa de serviço, total final e forma de pagamento.<br>
+              • <b>Relatório de Produtos</b>: Lista o estoque atual de todos os itens cadastrados.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── CAIXA ────────────────────────────────────────────────── -->
+    <section id="tab-caixa" class="tab">
+      <div class="metrics" id="metrics"></div>
+      <div class="two-col" style="margin-top:16px">
+        <div>
+          <h2>Histórico de Hoje</h2>
+          <div class="card scroll" id="historico"></div>
+        </div>
+        <div>
+          <h2>Vendas por Categoria</h2>
+          <div class="card" id="vendas-cat"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ESTOQUE ───────────────────────────────────────────────── -->
+    <section id="tab-estoque" class="tab">
+      <div class="row" style="margin-bottom:16px">
+        <h2>Controle de Estoque</h2>
+        <span class="badge badge-red" id="alerta-estoque" style="display:none"></span>
+      </div>
+      <div class="card" id="lista-estoque"></div>
+    </section>
+
+  </main>
+
+  <!-- Modal de Fechamento -->
+  <div id="modal-fechamento" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-title">Fechar Conta</div>
+      <div class="modal-body">
+        <div class="modal-row">
+          <label>Forma de Pagamento:</label>
+          <select id="select-pagamento"></select>
+        </div>
+        <div class="modal-row">
+          <label>Incluir Taxa de Serviço (10%):</label>
+          <input type="checkbox" id="check-taxa" />
+        </div>
+        <div class="modal-row">
+          <label>Desconto:</label>
+          <select id="select-desconto-tipo">
+            <option value="">Sem desconto</option>
+            <option value="pct">Percentual (%)</option>
+            <option value="valor">Valor (R$)</option>
+          </select>
+        </div>
+        <div class="modal-row" id="row-desconto-pct" style="display:none">
+          <label>Desconto (%):</label>
+          <input type="number" id="input-desconto-pct" placeholder="0" min="0" max="100" step="1" />
+        </div>
+        <div class="modal-row" id="row-desconto-val" style="display:none">
+          <label>Desconto (R$):</label>
+          <input type="number" id="input-desconto-val" placeholder="0.00" min="0" step="0.01" />
+        </div>
+        <div class="modal-row">
+          <label>Saldo Atual:</label>
+          <strong id="fechamento-saldo-atual">R$ 0,00</strong>
+        </div>
+        <div class="modal-row">
+          <label>Desconto Aplicado:</label>
+          <strong id="fechamento-desconto-aplicado">R$ 0,00</strong>
+        </div>
+        <div class="modal-row">
+          <label>Valor a Abater (R$):</label>
+          <input type="number" id="input-abater" placeholder="0.00" min="0" step="0.01" />
+        </div>
+        <div class="modal-row">
+          <label>Saldo Restante:</label>
+          <strong id="fechamento-saldo-restante">R$ 0,00</strong>
+        </div>
+        <div class="modal-row">
+          <label>Impressão:</label>
+          <select id="select-impressao">
+            <option value="pedido">Pedido completo</option>
+            <option value="pagamento">Somente pagamento</option>
+            <option value="nenhum">Não imprimir</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="document.getElementById('modal-fechamento').style.display='none'">Cancelar</button>
+        <button class="btn btn-primary" onclick="app.confirmarFechamento()">Confirmar Pagamento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Usuário -->
+  <div id="modal-usuario" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-title">Login</div>
+      <div class="modal-body">
+        <div class="modal-row">
+          <label>Usuário:</label>
+          <select id="select-user-id"></select>
+        </div>
+        <div class="modal-row">
+          <label>Senha (se houver):</label>
+          <input type="password" id="select-user-senha" placeholder="••••" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="app.logout()">Sair</button>
+        <button class="btn btn-primary" onclick="app.confirmarTrocaUsuario()">Entrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Pedidos Fechados -->
+  <div id="modal-fechados" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-title">Pedidos Fechados</div>
+      <div class="modal-body">
+        <div class="row" style="gap:8px; flex-wrap:wrap">
+          <div class="form-group" style="min-width:140px">
+            <label>De</label>
+            <input type="date" id="f-fechados-de" />
+          </div>
+          <div class="form-group" style="min-width:140px">
+            <label>Até</label>
+            <input type="date" id="f-fechados-ate" />
+          </div>
+          <div class="form-group" style="min-width:160px">
+            <label>Forma</label>
+            <select id="f-fechados-forma"></select>
+          </div>
+          <div class="form-group" style="min-width:120px">
+            <label>Mesa</label>
+            <input id="f-fechados-mesa" type="text" placeholder="Ex: 1" />
+          </div>
+          <button class="btn btn-sm" style="margin-top:20px" onclick="app.aplicarFiltroFechados()">Filtrar</button>
+          <button class="btn btn-sm" style="margin-top:20px" onclick="app.exportarFechadosFiltrado()">Exportar CSV</button>
+        </div>
+        <div id="lista-fechados" class="simple-list" style="margin-top:0"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="app.fecharPedidosFechados()">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Imagem -->
+  <div id="modal-imagem" class="modal-overlay" onclick="app.fecharImagem()">
+    <div class="modal-card" onclick="event.stopPropagation()" style="max-width:520px">
+      <div class="modal-title" id="modal-imagem-titulo">Imagem</div>
+      <div class="modal-body">
+        <img id="modal-imagem-img" alt="" style="width:100%;height:auto;border-radius:10px;border:1px solid #e0ddd6;object-fit:contain" />
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="app.fecharImagem()">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="print-area" class="print-area" style="display:none"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

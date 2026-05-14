@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Espetinho 075",
+    "slug": "espetinho-075",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./web/assets/logo.jpg",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./web/assets/logo.jpg",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./web/assets/logo.jpg",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "favicon": "./web/assets/logo.jpg"
+    }
+  }
+}
