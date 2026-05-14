@@ -40,6 +40,7 @@ document.getElementById('nav').addEventListener('click', e => {
 window.app = {
   selecionarMesa(n)    { store.selecionarMesa(n); },
   addItem()            { _addItem(); },
+  addItemById(id)      { _addItemById(id); },
   changeQty(id, delta) { _changeQty(id, delta); },
   removeItem(id)       { _removeItem(id); },
   fecharMesaModal()    { _abrirModalFechar(); },
@@ -358,10 +359,41 @@ function renderComanda(state) {
     </button>
   `;
 
+  const isMobile = !!(window.matchMedia && window.matchMedia('(max-width: 980px)').matches);
   const disponiveis = store.getProdutosDisponiveis();
   const opcoesSelect = disponiveis
     .map(p => `<option value="${p.id}">${p.nome} — ${formatBRL(p.preco)}</option>`)
     .join('');
+
+  const gridProdutosHTML = disponiveis
+    .slice()
+    .sort((a, b) => String(a?.nome || '').localeCompare(String(b?.nome || ''), 'pt-BR'))
+    .map(p => `
+      <button type="button" class="prod-btn" onclick="app.addItemById(${p.id})" title="Adicionar: ${p.nome}">
+        ${p.imagem
+          ? `<img class="thumb" src="${p.imagem}" alt="" onerror="this.style.display='none'">`
+          : `<div class="thumb placeholder" title="Sem imagem">🖼️</div>`
+        }
+        <div class="prod-nome">${p.nome}</div>
+        <div class="prod-preco">${formatBRL(p.preco)}</div>
+      </button>
+    `).join('');
+
+  const seletorProdutoHTML = isMobile
+    ? `
+      <div class="prod-picker">
+        ${gridProdutosHTML || '<p class="empty-msg">Nenhum produto disponível.</p>'}
+      </div>
+    `
+    : `
+      <div class="add-item-row">
+        <select id="sel-item">
+          <option value="">Selecione um produto...</option>
+          ${opcoesSelect}
+        </select>
+        <button class="btn btn-primary" onclick="app.addItem()">+ Add</button>
+      </div>
+    `;
 
   const itensHTML = mesa.itens.length === 0
     ? '<p class="empty-msg">Nenhum item adicionado.</p>'
@@ -386,13 +418,7 @@ function renderComanda(state) {
       `).join('');
 
   body.innerHTML = `
-    <div class="add-item-row">
-      <select id="sel-item">
-        <option value="">Selecione um produto...</option>
-        ${opcoesSelect}
-      </select>
-      <button class="btn btn-primary" onclick="app.addItem()">+ Add</button>
-    </div>
+    ${seletorProdutoHTML}
     <hr style="border:none;border-top:1px solid #ece9e2;margin-bottom:12px"/>
     <div class="item-list">${itensHTML}</div>
     <div class="total-bar">
@@ -1522,10 +1548,18 @@ function _addItem() {
   const id  = parseInt(sel?.value);
   const n   = store.getState().mesaSelecionada;
   if (!id || !n) return;
+  _addItemById(id);
+  if (sel) sel.value = '';
+}
+
+function _addItemById(id) {
+  const produtoId = parseInt(id);
+  const n = store.getState().mesaSelecionada;
+  if (!produtoId || !n) return;
   try {
     const st = store.getState();
-    const prod = st.produtos?.find(p => p.id === id);
-    const filaItem = store.adicionarItemMesa(n, id);
+    const prod = st.produtos?.find(p => p.id === produtoId);
+    const filaItem = store.adicionarItemMesa(n, produtoId);
     const cfg = st.impressao || {};
     const setor = filaItem?.setor;
     if (prod && (setor === 'churrasco' || setor === 'cozinha')) {
