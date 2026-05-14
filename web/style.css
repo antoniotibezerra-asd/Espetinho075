@@ -328,10 +328,18 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 .ticket-row { display: flex; justify-content: space-between; }
 .ticket-divider { border-bottom: 1px dashed #000; margin: 5px 0; }
 
-@media (max-width: 700px) {
+@media (max-width: 980px) {
+  .topbar { flex-wrap: wrap; gap: 10px; padding: 10px 12px; }
+  .nav { overflow-x: auto; white-space: nowrap; padding-bottom: 6px; }
+  .nav-btn { flex: 0 0 auto; }
+  .main { padding: 12px; }
   .two-col { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
   .mesa-lista { grid-template-columns: repeat(4, 1fr); }
   .user-form-actions { flex-direction: column; align-items: stretch; }
   .user-form-actions .btn { width: 100%; }
+}
+
+@media (max-width: 420px) {
+  .mesa-lista { grid-template-columns: repeat(3, 1fr); }
 }
