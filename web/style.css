@@ -214,11 +214,13 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
   border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font);
 }
 
-.user-form-row { display: flex; flex-direction: column; gap: 4px; }
-.user-form-row .form-group { width: 100%; flex: 0 0 auto; gap: 1px; }
+.user-form-row { display: grid; grid-auto-flow: row; grid-auto-rows: min-content; row-gap: 4px; }
+.user-form-row .form-group { width: 100%; gap: 1px; }
 .user-form-row .form-group label { font-size: 11px; }
 .user-form-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 0; }
 .user-form-actions .btn { margin-top: 0; }
+
+.user-form-row input, .user-form-row select { padding-top: 6px; padding-bottom: 6px; }
 
 /* ── Cardápio lista ── */
 .cat-label {
