@@ -214,11 +214,10 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
   border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font);
 }
 
-.user-form-row { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)) auto; gap: 8px; align-items: end; }
-.user-form-row .form-group { min-width: 0; }
-.user-form-row .form-group label { min-height: 32px; }
-.user-form-row .btn { margin-top: 20px; justify-self: end; }
-.user-form-row #btn-usuario-cancel { justify-self: start; }
+.user-form-row { display: flex; flex-direction: column; gap: 10px; }
+.user-form-row .form-group { width: 100%; }
+.user-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.user-form-actions .btn { margin-top: 6px; }
 
 /* ── Cardápio lista ── */
 .cat-label {
@@ -330,6 +329,6 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
   .two-col { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
   .mesa-lista { grid-template-columns: repeat(4, 1fr); }
-  .user-form-row { grid-template-columns: 1fr 1fr; }
-  .user-form-row .btn { width: 100%; justify-self: stretch; margin-top: 0; grid-column: 1 / -1; }
+  .user-form-actions { flex-direction: column; align-items: stretch; }
+  .user-form-actions .btn { width: 100%; }
 }
