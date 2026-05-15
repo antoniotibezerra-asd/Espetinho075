@@ -208,6 +208,70 @@ async function _supabaseImportCadastros() {
   }
 }
 
+let _autoCadTimer = null;
+let _autoCadInFlight = false;
+let _lastAutoCadKey = '';
+let _lastAutoCadAt = 0;
+let _lastAutoCadFailAt = 0;
+
+function _produtosKey() {
+  const st = store.getState();
+  const prods = Array.isArray(st?.produtos) ? st.produtos : [];
+  return JSON.stringify(
+    prods
+      .map(p => ({
+        id: Number(p?.id) || 0,
+        nome: String(p?.nome || ''),
+        cat: String(p?.cat || ''),
+        subcat: String(p?.subcat || ''),
+        preco: Number(p?.preco) || 0,
+        estoque: Number(p?.estoque) || 0,
+        estoqueMinimo: Number(p?.estoqueMinimo) || 0,
+        imagem: String(p?.imagem || ''),
+      }))
+      .sort((a, b) => a.id - b.id)
+  );
+}
+
+function _queueAutoExportCadastros() {
+  if (_autoCadTimer) return;
+  _autoCadTimer = setTimeout(() => {
+    _autoCadTimer = null;
+    _autoExportCadastrosIfNeeded().catch(() => {});
+  }, 1800);
+}
+
+async function _autoExportCadastrosIfNeeded() {
+  const now = Date.now();
+  if (_autoCadInFlight) return;
+  if (_lastAutoCadFailAt && (now - _lastAutoCadFailAt) < 15_000) return;
+  if (_lastAutoCadAt && (now - _lastAutoCadAt) < 3_500) return;
+
+  await _supabaseAtualizarStatus();
+  if (!_supabaseInfo?.configured) return;
+
+  const key = _produtosKey();
+  if (key === _lastAutoCadKey) return;
+
+  _autoCadInFlight = true;
+  try {
+    const snap = store.getSyncSnapshot();
+    const r = await fetch('/api/supabase/cadastros', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: snap }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.ok) throw new Error(j?.error || 'Falha ao exportar cadastros.');
+    _lastAutoCadKey = key;
+    _lastAutoCadAt = Date.now();
+  } catch {
+    _lastAutoCadFailAt = Date.now();
+  } finally {
+    _autoCadInFlight = false;
+  }
+}
+
 let _saveTimer = null;
 let _saveFailShown = false;
 store.subscribe(() => {
@@ -238,6 +302,7 @@ store.subscribe(() => {
           _serverInfo.updatedAt = Number(json?.server?.updatedAt) || Date.now();
           _saveFailShown = false;
           _supabaseAtualizarStatus();
+          _queueAutoExportCadastros();
           return;
         }
         if (!_saveFailShown) {
