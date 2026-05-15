@@ -341,9 +341,9 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
   .prod-picker {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    margin-bottom: 12px;
-    max-height: 240px;
+    gap: 8px;
+    margin-bottom: 10px;
+    max-height: min(210px, 32vh);
     overflow: auto;
     -webkit-overflow-scrolling: touch;
     padding: 2px 0;
@@ -352,17 +352,17 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
     border: var(--border);
     background: rgba(255, 255, 255, 0.9);
     border-radius: 14px;
-    padding: 10px 8px;
+    padding: 8px 6px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     cursor: pointer;
   }
   .prod-btn:active { transform: scale(0.99); }
-  .prod-btn .thumb { width: 76px; height: 76px; border-radius: 14px; }
+  .prod-btn .thumb { width: 70px; height: 70px; border-radius: 14px; }
   .prod-nome {
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 800;
     text-align: center;
     line-height: 1.15;
@@ -370,9 +370,9 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    min-height: 28px;
+    min-height: 26px;
   }
-  .prod-preco { font-size: 12px; color: #666; }
+  .prod-preco { font-size: 11px; color: #666; }
   .nav {
     position: fixed;
     left: 0;

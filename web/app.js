@@ -122,7 +122,10 @@ function _supabaseRenderStatus() {
   if (!el) return;
   if (!_supabaseInfo) { el.textContent = '—'; return; }
   if (_supabaseInfo.configured) {
-    el.textContent = 'Conectado (cadastros)';
+    const backend = _supabaseInfo.stateBackend === 'supabase'
+      ? `Estado: Supabase (${_supabaseInfo.stateTable}/${_supabaseInfo.appInstanceId})`
+      : 'Estado: arquivo local';
+    el.textContent = `Conectado · ${backend}`;
   } else {
     el.textContent = 'Não configurado no servidor';
   }
@@ -206,6 +209,7 @@ async function _supabaseImportCadastros() {
 }
 
 let _saveTimer = null;
+let _saveFailShown = false;
 store.subscribe(() => {
   if (!carregadoDoServidor) return;
   if (_saveTimer) clearTimeout(_saveTimer);
@@ -232,6 +236,14 @@ store.subscribe(() => {
         if (r.ok) {
           _serverInfo.rev = Number(json?.server?.rev) || Number(payloadState?.sync?.rev) || _serverInfo.rev;
           _serverInfo.updatedAt = Number(json?.server?.updatedAt) || Date.now();
+          _saveFailShown = false;
+          _supabaseAtualizarStatus();
+          return;
+        }
+        if (!_saveFailShown) {
+          _saveFailShown = true;
+          _supabaseAtualizarStatus(true);
+          alert(`Falha ao salvar no servidor: ${json?.error || 'erro desconhecido'}.\n\nSe estiver usando Supabase, verifique RLS/policies da tabela e se o servidor tem SUPABASE_SERVICE_ROLE_KEY.`);
         }
       })
       .catch(() => {});
