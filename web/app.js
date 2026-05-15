@@ -21,6 +21,7 @@ let _supabaseInfo = null;
 let _supabaseInfoTs = 0;
 let _stateStream = null;
 let _stateStreamTs = 0;
+let _mobileProdCat = '';
 
 // Reage a qualquer mudança de estado
 store.subscribe(render);
@@ -41,6 +42,10 @@ window.app = {
   selecionarMesa(n)    { store.selecionarMesa(n); },
   addItem()            { _addItem(); },
   addItemById(id)      { _addItemById(id); },
+  setMobileProdCat(cat) {
+    _mobileProdCat = String(cat || '').trim();
+    renderComanda(store.getState());
+  },
   changeQty(id, delta) { _changeQty(id, delta); },
   removeItem(id)       { _removeItem(id); },
   fecharMesaModal()    { _abrirModalFechar(); },
@@ -472,11 +477,17 @@ function renderComanda(state) {
 
   const isMobile = !!(window.matchMedia && window.matchMedia('(max-width: 980px)').matches);
   const disponiveis = store.getProdutosDisponiveis();
+  const cats = Array.from(
+    new Set(disponiveis.map(p => String(p?.cat || '').trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const activeCat = cats.includes(_mobileProdCat) ? _mobileProdCat : '';
+  if (_mobileProdCat && !activeCat) _mobileProdCat = '';
+  const disponiveisFiltrados = activeCat ? disponiveis.filter(p => p?.cat === activeCat) : disponiveis;
   const opcoesSelect = disponiveis
     .map(p => `<option value="${p.id}">${p.nome} — ${formatBRL(p.preco)}</option>`)
     .join('');
 
-  const gridProdutosHTML = disponiveis
+  const gridProdutosHTML = disponiveisFiltrados
     .slice()
     .sort((a, b) => String(a?.nome || '').localeCompare(String(b?.nome || ''), 'pt-BR'))
     .map(p => `
@@ -492,6 +503,10 @@ function renderComanda(state) {
 
   const seletorProdutoHTML = isMobile
     ? `
+      <div class="prod-filters" role="tablist" aria-label="Filtro de categorias">
+        <button type="button" class="chip ${activeCat ? '' : 'active'}" onclick="app.setMobileProdCat('')">Todas</button>
+        ${cats.map(c => `<button type="button" class="chip ${c === activeCat ? 'active' : ''}" onclick="app.setMobileProdCat(${JSON.stringify(c)})">${c}</button>`).join('')}
+      </div>
       <div class="prod-picker">
         ${gridProdutosHTML || '<p class="empty-msg">Nenhum produto disponível.</p>'}
       </div>

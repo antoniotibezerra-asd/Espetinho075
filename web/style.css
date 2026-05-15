@@ -338,6 +338,29 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
   .user-badge { width: 100%; justify-content: space-between; border: var(--border); background: #fff8ef; }
   .thumb { width: 56px; height: 56px; border-radius: 10px; }
   .thumb.placeholder { font-size: 20px; }
+  .prod-filters {
+    display: flex;
+    gap: 6px;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 2px 0 8px;
+  }
+  .chip {
+    border: 1px solid #e0ddd6;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #6c5a49;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .chip.active {
+    background: #2B1D0E;
+    border-color: #2B1D0E;
+    color: #fff;
+  }
   .prod-picker {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
