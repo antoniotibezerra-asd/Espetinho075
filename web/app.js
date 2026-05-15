@@ -255,10 +255,44 @@ async function carregarInicial() {
     const r = await fetch('/api/state');
     if (r.ok) {
       const data = await r.json();
-      if (data?.state) store.importarEstado(data.state);
-      _serverInfo.rev = Number(data?.server?.rev) || 0;
-      _serverInfo.updatedAt = Number(data?.server?.updatedAt) || 0;
-      _remoteCache = { state: data?.state || null, server: { rev: _serverInfo.rev, updatedAt: _serverInfo.updatedAt } };
+      if (data?.state) {
+        store.importarEstado(data.state);
+        const after = store.exportarEstado();
+        try {
+          const a = JSON.stringify(data.state);
+          const b = JSON.stringify(after);
+          if (a !== b) {
+            const srvRev = Number(data?.server?.rev) || 0;
+            const r2 = await fetch('/api/state', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ state: after, ifRev: srvRev }),
+            });
+            const j2 = await r2.json().catch(() => ({}));
+            if (r2.ok) {
+              _serverInfo.rev = Number(j2?.server?.rev) || Number(after?.sync?.rev) || 0;
+              _serverInfo.updatedAt = Number(j2?.server?.updatedAt) || Date.now();
+              _remoteCache = { state: after, server: { rev: _serverInfo.rev, updatedAt: _serverInfo.updatedAt } };
+            } else {
+              _serverInfo.rev = srvRev;
+              _serverInfo.updatedAt = Number(data?.server?.updatedAt) || 0;
+              _remoteCache = { state: data?.state || null, server: { rev: _serverInfo.rev, updatedAt: _serverInfo.updatedAt } };
+            }
+          } else {
+            _serverInfo.rev = Number(data?.server?.rev) || 0;
+            _serverInfo.updatedAt = Number(data?.server?.updatedAt) || 0;
+            _remoteCache = { state: data?.state || null, server: { rev: _serverInfo.rev, updatedAt: _serverInfo.updatedAt } };
+          }
+        } catch {
+          _serverInfo.rev = Number(data?.server?.rev) || 0;
+          _serverInfo.updatedAt = Number(data?.server?.updatedAt) || 0;
+          _remoteCache = { state: data?.state || null, server: { rev: _serverInfo.rev, updatedAt: _serverInfo.updatedAt } };
+        }
+      } else {
+        _serverInfo.rev = Number(data?.server?.rev) || 0;
+        _serverInfo.updatedAt = Number(data?.server?.updatedAt) || 0;
+        _remoteCache = { state: data?.state || null, server: { rev: _serverInfo.rev, updatedAt: _serverInfo.updatedAt } };
+      }
     }
   } catch (e) {}
 

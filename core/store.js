@@ -1084,6 +1084,7 @@ export function criarStore() {
   function importarEstado(novo) {
     const base = criarEstadoInicial();
     const s = { ...base, ...(novo || {}) };
+    let normalizou = false;
     if (!s.empresa) s.empresa = { ...base.empresa };
     if (!s.aparencia || typeof s.aparencia !== 'object') s.aparencia = { ...base.aparencia };
     if (!s.perfis) s.perfis = JSON.parse(JSON.stringify(base.perfis));
@@ -1104,6 +1105,17 @@ export function criarStore() {
     if (!s.impressao || typeof s.impressao !== 'object') s.impressao = { ...base.impressao };
     if (s.impressao.perguntarViasSetor === undefined) s.impressao.perguntarViasSetor = !!base.impressao.perguntarViasSetor;
     if (s.impressao.autoImprimirViasSetor === undefined) s.impressao.autoImprimirViasSetor = !!base.impressao.autoImprimirViasSetor;
+    const catsInput = Array.isArray(s.categorias) ? s.categorias : [];
+    if (catsInput.length) {
+      const seen = new Set();
+      for (const v of catsInput) {
+        const t = normalizarTexto(v);
+        if (!t) continue;
+        const k = t.toLowerCase();
+        if (seen.has(k)) { normalizou = true; break; }
+        seen.add(k);
+      }
+    }
     const categorias = [];
     const catSeen = new Set();
     const catPush = (v) => {
@@ -1154,16 +1166,19 @@ export function criarStore() {
         const hash = parts[2] || '';
         out.senhaSalt = salt;
         out.senhaHash = hash;
+        normalizou = true;
       }
       if (out.senha && !out.senhaHash) {
         const salt = randomToken(8);
         out.senhaSalt = salt;
         out.senhaHash = sha256Hex(`${salt}:${String(out.senha)}`);
         delete out.senha;
+        normalizou = true;
       }
       if (out.senhaHash && !normalizarTexto(out.senhaSalt)) {
         out.senhaSalt = '';
         out.senhaHash = '';
+        normalizou = true;
       }
       return out;
     });
@@ -1175,6 +1190,10 @@ export function criarStore() {
     if (!s.sessoes || typeof s.sessoes !== 'object') s.sessoes = {};
     s.sessao = null;
     s.usuarioAtivo = null;
+    if (normalizou) {
+      const rev = Number.isFinite(Number(s.sync?.rev)) ? Number(s.sync.rev) : 0;
+      s.sync = { ...(s.sync || {}), rev: rev + 1, updatedAt: Date.now(), updatedBy: null };
+    }
 
     state = s;
     notificar();
