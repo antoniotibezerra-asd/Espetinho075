@@ -1104,7 +1104,7 @@ export function criarStore() {
     if (!s.impressao || typeof s.impressao !== 'object') s.impressao = { ...base.impressao };
     if (s.impressao.perguntarViasSetor === undefined) s.impressao.perguntarViasSetor = !!base.impressao.perguntarViasSetor;
     if (s.impressao.autoImprimirViasSetor === undefined) s.impressao.autoImprimirViasSetor = !!base.impressao.autoImprimirViasSetor;
-    if (!Array.isArray(s.categorias)) s.categorias = [];
+    const categorias = [];
     const catSeen = new Set();
     const catPush = (v) => {
       const t = normalizarTexto(v);
@@ -1112,12 +1112,13 @@ export function criarStore() {
       const k = t.toLowerCase();
       if (catSeen.has(k)) return;
       catSeen.add(k);
-      s.categorias.push(t);
+      categorias.push(t);
     };
     (base.categorias || []).forEach(catPush);
-    (s.categorias || []).forEach(catPush);
+    (Array.isArray(s.categorias) ? s.categorias : []).forEach(catPush);
     (s.produtos || []).forEach(p => catPush(p?.cat));
     (s.subcategorias || []).forEach(sc => catPush(sc?.cat));
+    s.categorias = categorias;
     if (!Array.isArray(s.produtos)) s.produtos = [...base.produtos];
     s.produtos = s.produtos.map(p => {
       const out = { ...p };
