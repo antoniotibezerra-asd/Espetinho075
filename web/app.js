@@ -27,6 +27,7 @@ let _activeUserIdCache = 0;
 let _pendingSave = false;
 let _lastSavedAt = 0;
 let _lastSaveError = '';
+let _relChartResizeTimer = null;
 
 // Reage a qualquer mudança de estado
 store.subscribe(render);
@@ -2272,7 +2273,165 @@ function renderRelatorios(state) {
   const fmtBRL = (v) => `R$ ${Number(v || 0).toFixed(2).replace('.', ',')}`;
 
   resumoEl.textContent = `Período: ${filtros.de} → ${filtros.ate} · Pagamentos: ${pagamentos} · Fechamentos: ${fechamentos.length} · Total vendido: ${fmtBRL(totalVendido)} · Total recebido: ${fmtBRL(totalRecebido)} · Ticket médio: ${fmtBRL(ticketMedio)}`;
+  _renderDashboardRelatorios(state, itens, fechamentos);
 }
+
+function _canvas2d(el) {
+  if (!el) return null;
+  const ctx = el.getContext('2d');
+  if (!ctx) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = el.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width * dpr));
+  const h = Math.max(1, Math.floor(rect.height * dpr));
+  if (el.width !== w) el.width = w;
+  if (el.height !== h) el.height = h;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+
+function _drawBarChart(canvas, labels, values, color) {
+  const ctx = _canvas2d(canvas);
+  if (!ctx) return;
+  const w = canvas.getBoundingClientRect().width;
+  const h = canvas.getBoundingClientRect().height;
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 8;
+  const padR = 8;
+  const padT = 10;
+  const padB = 18;
+  const plotW = Math.max(1, w - padL - padR);
+  const plotH = Math.max(1, h - padT - padB);
+  const maxV = Math.max(...values, 1);
+
+  const n = Math.min(labels.length, values.length, 8);
+  const barH = (plotH / n) * 0.62;
+  const rowH = plotH / n;
+  ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+  ctx.textBaseline = 'middle';
+
+  for (let i = 0; i < n; i++) {
+    const y = padT + i * rowH + rowH / 2;
+    const v = Number(values[i]) || 0;
+    const pct = v / maxV;
+    const bw = Math.max(2, Math.round(plotW * pct));
+    ctx.fillStyle = '#ece9e2';
+    ctx.fillRect(padL, y - barH / 2, plotW, barH);
+    ctx.fillStyle = color;
+    ctx.fillRect(padL, y - barH / 2, bw, barH);
+    ctx.fillStyle = '#2B1D0E';
+    ctx.fillText(String(labels[i] || '').slice(0, 18), padL + 6, y);
+    ctx.fillStyle = '#666';
+    ctx.textAlign = 'right';
+    ctx.fillText(`R$ ${v.toFixed(0)}`, w - padR, y);
+    ctx.textAlign = 'left';
+  }
+}
+
+function _drawLineChart(canvas, labels, values, color) {
+  const ctx = _canvas2d(canvas);
+  if (!ctx) return;
+  const w = canvas.getBoundingClientRect().width;
+  const h = canvas.getBoundingClientRect().height;
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 28;
+  const padR = 10;
+  const padT = 10;
+  const padB = 22;
+  const plotW = Math.max(1, w - padL - padR);
+  const plotH = Math.max(1, h - padT - padB);
+  const maxV = Math.max(...values, 1);
+
+  ctx.strokeStyle = '#ece9e2';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (plotH * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
+    ctx.stroke();
+  }
+
+  const n = Math.max(labels.length, values.length, 1);
+  const xAt = (i) => padL + (plotW * i) / Math.max(1, n - 1);
+  const yAt = (v) => padT + plotH - (plotH * (v / maxV));
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = xAt(i);
+    const y = yAt(Number(values[i]) || 0);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = color;
+  for (let i = 0; i < n; i++) {
+    const x = xAt(i);
+    const y = yAt(Number(values[i]) || 0);
+    ctx.beginPath();
+    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = '#666';
+  ctx.font = '11px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const step = Math.ceil(n / 8);
+  for (let i = 0; i < n; i += step) {
+    ctx.fillText(String(labels[i] || ''), xAt(i), padT + plotH + 6);
+  }
+  ctx.textAlign = 'left';
+}
+
+function _renderDashboardRelatorios(state, itens, fechamentos) {
+  const catCanvas = document.getElementById('chart-rel-cat');
+  const pagCanvas = document.getElementById('chart-rel-pag');
+  const horaCanvas = document.getElementById('chart-rel-hora');
+  if (!catCanvas || !pagCanvas || !horaCanvas) return;
+
+  const catTot = {};
+  fechamentos.forEach(h => {
+    (h.itens || []).forEach(it => {
+      const p = (state.produtos || []).find(x => x.id === it.id);
+      const cat = p?.cat || 'Outros';
+      catTot[cat] = (catTot[cat] || 0) + (Number(it.preco) || 0) * (Number(it.qty) || 0);
+    });
+  });
+  const catRows = Object.entries(catTot).sort((a, b) => b[1] - a[1]);
+  _drawBarChart(catCanvas, catRows.map(x => x[0]), catRows.map(x => x[1]), '#2FA15F');
+
+  const payTot = {};
+  itens.forEach(h => {
+    const f = h.formaPagamento || '—';
+    const v = (Number(h.valorPago) || Number(h.total) || 0);
+    payTot[f] = (payTot[f] || 0) + v;
+  });
+  const payRows = Object.entries(payTot).sort((a, b) => b[1] - a[1]);
+  _drawBarChart(pagCanvas, payRows.map(x => x[0]), payRows.map(x => x[1]), '#D9A441');
+
+  const byHour = new Array(24).fill(0);
+  fechamentos.forEach(h => {
+    const ts = Number(h.ts) || 0;
+    const hr = ts ? new Date(ts).getHours() : null;
+    if (hr === null) return;
+    byHour[hr] += Number(h.total) || 0;
+  });
+  const labels = byHour.map((_, i) => String(i).padStart(2, '0'));
+  _drawLineChart(horaCanvas, labels, byHour, '#2B1D0E');
+}
+
+window.addEventListener('resize', () => {
+  if (_relChartResizeTimer) clearTimeout(_relChartResizeTimer);
+  _relChartResizeTimer = setTimeout(() => {
+    try { renderRelatorios(store.getState()); } catch {}
+  }, 200);
+});
 
 function _exportarProdutosVendidosCSV() {
   const state = store.getState();

@@ -258,6 +258,23 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 .prog-bar { height: 6px; background: #ece9e2; border-radius: 3px; overflow: hidden; margin-top: 6px; }
 .prog-fill { height: 100%; border-radius: 3px; }
 
+/* ── Dashboard ── */
+.dash-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+.dash-card {
+  background: rgba(255, 255, 255, 0.65);
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.dash-wide { grid-column: 1 / -1; }
+.dash-title { font-size: 12px; font-weight: 800; color: var(--primary-2); margin-bottom: 8px; }
+.dash-canvas { width: 100%; height: 220px; display: block; }
+
 /* ── Histórico ── */
 .hist-row {
   display: flex; align-items: center; gap: 10px;
@@ -349,6 +366,8 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
   .logo-container { display: none; }
   .spacer { display: none; }
   .user-badge { width: 100%; justify-content: space-between; border: var(--border); background: #fff8ef; }
+  .dash-grid { grid-template-columns: 1fr; }
+  .dash-canvas { height: 200px; }
   .thumb { width: 56px; height: 56px; border-radius: 10px; }
   .thumb.placeholder { font-size: 20px; }
   .prod-filters {
