@@ -452,15 +452,64 @@
         <div>
           <h2>Relatórios de Vendas</h2>
           <div class="card">
-            <p style="font-size:13px; color:#666; margin-bottom:16px">Gere e exporte os dados de vendas para análise externa.</p>
-            <div class="simple-list">
-              <div class="simple-item">
-                <span>Vendas do Dia (Completo)</span>
-                <button class="btn btn-sm btn-primary" onclick="app.exportarRelatorio()">📊 Baixar CSV</button>
+            <p style="font-size:13px; color:#666; margin-bottom:16px">Filtre por período e exporte relatórios em CSV.</p>
+            <div class="form-card">
+              <div class="row" style="align-items:flex-end; gap:10px">
+                <div class="form-group" style="flex:1">
+                  <label>De</label>
+                  <input id="rel-de" type="date" />
+                </div>
+                <div class="form-group" style="flex:1">
+                  <label>Até</label>
+                  <input id="rel-ate" type="date" />
+                </div>
               </div>
-              <div class="simple-item">
-                <span>Relatório de Produtos (Estoque)</span>
-                <button class="btn btn-sm" onclick="app.exportarRelatorioEstoque()">📦 Baixar CSV</button>
+              <div class="row" style="align-items:flex-end; gap:10px">
+                <div class="form-group" style="flex:1">
+                  <label>Forma de pagamento</label>
+                  <select id="rel-forma">
+                    <option value="todas">Todas</option>
+                  </select>
+                </div>
+                <div class="form-group" style="flex:1">
+                  <label>Tipo</label>
+                  <select id="rel-tipo-mesa">
+                    <option value="todas">Todas</option>
+                    <option value="presencial">Presenciais</option>
+                    <option value="online">Online</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row" style="align-items:center; gap:10px">
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#666">
+                  <input type="checkbox" id="rel-incluir-parciais" />
+                  Incluir pagamentos parciais
+                </label>
+                <div class="spacer"></div>
+                <button class="btn btn-sm" onclick="app.aplicarFiltroRelatorios()">Atualizar</button>
+              </div>
+              <div id="rel-resumo" style="font-size:12px; color:#777; line-height:1.5"></div>
+              <div class="simple-list" style="margin-top:10px">
+                <div class="simple-item">
+                  <span>Vendas (filtrado)</span>
+                  <button class="btn btn-sm btn-primary" onclick="app.exportarRelatorio()">📊 Baixar CSV</button>
+                </div>
+                <div class="simple-item">
+                  <span>Produtos vendidos (filtrado)</span>
+                  <button class="btn btn-sm" onclick="app.exportarRelatorioProdutos()">🧾 Baixar CSV</button>
+                </div>
+                <div class="simple-item">
+                  <span>Vendas por categoria (filtrado)</span>
+                  <button class="btn btn-sm" onclick="app.exportarRelatorioCategorias()">🏷️ Baixar CSV</button>
+                </div>
+                <div class="simple-item">
+                  <span>Vendas por pagamento (filtrado)</span>
+                  <button class="btn btn-sm" onclick="app.exportarRelatorioPagamentos()">💳 Baixar CSV</button>
+                </div>
+                <div class="simple-item">
+                  <span>Relatório de Produtos (Estoque)</span>
+                  <button class="btn btn-sm" onclick="app.exportarRelatorioEstoque()">📦 Baixar CSV</button>
+                </div>
               </div>
             </div>
           </div>
@@ -470,7 +519,10 @@
           <div class="card">
             <p style="font-size:13px; color:#666; line-height:1.6">
               Os relatórios são gerados em formato <b>CSV</b>, que pode ser aberto em programas como Excel, Google Sheets ou LibreOffice.<br><br>
-              • <b>Vendas do Dia</b>: Lista cada mesa fechada, hora, subtotal, taxa de serviço, total final e forma de pagamento.<br>
+              • <b>Vendas (filtrado)</b>: Lista pagamentos (fechamentos e/ou parciais), com data/hora, tipo, totais e forma de pagamento.<br>
+              • <b>Produtos vendidos</b>: Soma quantidades e faturamento por item no período.<br>
+              • <b>Vendas por categoria</b>: Soma faturamento agrupado por categoria.<br>
+              • <b>Vendas por pagamento</b>: Soma faturamento agrupado por forma de pagamento.<br>
               • <b>Relatório de Produtos</b>: Lista o estoque atual de todos os itens cadastrados.
             </p>
           </div>

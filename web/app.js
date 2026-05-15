@@ -57,6 +57,7 @@ window.app = {
     _persistMobileProdPrefs();
     _applyMobileProdFilters();
   },
+  aplicarFiltroRelatorios() { renderRelatorios(store.getState()); },
   changeQty(id, delta) { _changeQty(id, delta); },
   removeItem(id)       { _removeItem(id); },
   fecharMesaModal()    { _abrirModalFechar(); },
@@ -91,6 +92,9 @@ window.app = {
   aplicarFiltroAuditoria() { renderAuditoria(store.getState()); },
   exportarAuditoria()  { _exportarAuditoriaCSV(); },
   exportarRelatorio()  { _exportarCSV(); },
+  exportarRelatorioProdutos() { _exportarProdutosVendidosCSV(); },
+  exportarRelatorioCategorias() { _exportarCategoriasCSV(); },
+  exportarRelatorioPagamentos() { _exportarPagamentosCSV(); },
   exportarRelatorioEstoque() { _exportarEstoqueCSV(); },
   imprimirComanda()    { _imprimirComanda(); },
   abrirModalUsuario()  { _abrirModalUsuario(); },
@@ -122,6 +126,7 @@ function render(state) {
   renderUsuarios(state);
   renderPerfis(state);
   renderAuditoria(state);
+  renderRelatorios(state);
   renderCaixa(state);
   renderEstoque(state);
   renderFormasPagamento(state);
@@ -2198,17 +2203,155 @@ function _exportarCSV() {
   if (!perfil?.tabs?.relatorios || !perfil?.acoes?.verRelatorios) return alert('Sem permissão.');
   if (state.historico.length === 0) return alert('Nenhuma venda registrada para exportar.');
 
-  let csv = 'Hora;Mesa;Tipo;Subtotal;Taxa;Total;Valor Pago;Saldo Restante;Forma Pagamento\n';
-  state.historico.forEach(h => {
+  const { itens } = _getRelatorioHistoricoFiltrado(state);
+  if (itens.length === 0) return alert('Nenhuma venda encontrada para o filtro selecionado.');
+
+  let csv = 'Data;Hora;Mesa;Tipo Mesa;Tipo Pagamento;Subtotal;DescontoTipo;DescontoPct;DescontoValor;Taxa;Total;Valor Pago;Saldo Restante;Forma Pagamento\n';
+  itens.forEach(h => {
     const tipoMesa = h.tipoMesa || state.mesas[h.mesa]?.tipo;
-    const mesaLabel = tipoMesa === 'online' ? `Online ${h.mesa}` : `Mesa ${h.mesa}`;
     const tipoPg = h.tipoPagamento || 'fechamento';
     const valorPago = (typeof h.valorPago === 'number') ? h.valorPago : h.total;
     const saldoRestante = (typeof h.saldoRestante === 'number') ? h.saldoRestante : 0;
-    csv += `${h.hora};${mesaLabel};${tipoPg};${h.subtotal.toFixed(2)};${h.taxaServico.toFixed(2)};${h.total.toFixed(2)};${valorPago.toFixed(2)};${saldoRestante.toFixed(2)};${h.formaPagamento}\n`;
+    csv += `${h.data || ''};${h.hora || ''};${h.mesa};${tipoMesa || ''};${tipoPg};${Number(h.subtotal || 0).toFixed(2)};${h.descontoTipo || ''};${Number(h.descontoPct || 0).toFixed(2)};${Number(h.descontoValor || 0).toFixed(2)};${Number(h.taxaServico || 0).toFixed(2)};${Number(h.total || 0).toFixed(2)};${Number(valorPago || 0).toFixed(2)};${Number(saldoRestante || 0).toFixed(2)};${h.formaPagamento || ''}\n`;
   });
 
-  _downloadCSV(csv, `relatorio_vendas_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`);
+  _downloadCSV(csv, `relatorio_vendas_${new Date().toISOString().slice(0, 10)}.csv`);
+}
+
+function _getRelatorioFiltros(state) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  const deEl = document.getElementById('rel-de');
+  const ateEl = document.getElementById('rel-ate');
+  const formaEl = document.getElementById('rel-forma');
+  const tipoEl = document.getElementById('rel-tipo-mesa');
+  const parcEl = document.getElementById('rel-incluir-parciais');
+
+  const de = (deEl && deEl.value) ? deEl.value : hoje;
+  const ate = (ateEl && ateEl.value) ? ateEl.value : hoje;
+  const forma = formaEl ? (formaEl.value || 'todas') : 'todas';
+  const tipoMesa = tipoEl ? (tipoEl.value || 'todas') : 'todas';
+  const incluirParciais = parcEl ? !!parcEl.checked : false;
+  const tsDe = de ? new Date(`${de}T00:00:00`).getTime() : null;
+  const tsAte = ate ? new Date(`${ate}T23:59:59`).getTime() : null;
+  return { de, ate, forma, tipoMesa, incluirParciais, tsDe, tsAte };
+}
+
+function _getRelatorioHistoricoFiltrado(state) {
+  const f = _getRelatorioFiltros(state);
+  const itens = (state.historico || [])
+    .filter(h => (typeof f.tsDe === 'number' ? (Number(h.ts) || 0) >= f.tsDe : true))
+    .filter(h => (typeof f.tsAte === 'number' ? (Number(h.ts) || 0) <= f.tsAte : true))
+    .filter(h => (f.tipoMesa !== 'todas' ? (String(h.tipoMesa || state.mesas?.[h.mesa]?.tipo || '') === f.tipoMesa) : true))
+    .filter(h => (f.forma !== 'todas' ? String(h.formaPagamento || '') === f.forma : true))
+    .filter(h => (f.incluirParciais ? true : ((h.tipoPagamento || 'fechamento') === 'fechamento')));
+  return { filtros: f, itens };
+}
+
+function renderRelatorios(state) {
+  const deEl = document.getElementById('rel-de');
+  const ateEl = document.getElementById('rel-ate');
+  const formaEl = document.getElementById('rel-forma');
+  const resumoEl = document.getElementById('rel-resumo');
+  if (!deEl || !ateEl || !formaEl || !resumoEl) return;
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  if (!deEl.value) deEl.value = hoje;
+  if (!ateEl.value) ateEl.value = hoje;
+
+  const atual = formaEl.value || 'todas';
+  const formas = Array.isArray(state.formasPagamento) ? state.formasPagamento : [];
+  formaEl.innerHTML = ['<option value="todas">Todas</option>', ...formas.map(f => `<option value="${String(f).replace(/"/g, '&quot;')}">${f}</option>`)].join('');
+  formaEl.value = formas.includes(atual) ? atual : 'todas';
+
+  const { itens, filtros } = _getRelatorioHistoricoFiltrado(state);
+  const fechamentos = itens.filter(h => (h.tipoPagamento || 'fechamento') === 'fechamento');
+  const pagamentos = itens.length;
+  const totalRecebido = itens.reduce((s, h) => s + (Number(h.valorPago) || Number(h.total) || 0), 0);
+  const totalVendido = fechamentos.reduce((s, h) => s + (Number(h.total) || 0), 0);
+  const ticketMedio = fechamentos.length ? (totalVendido / fechamentos.length) : 0;
+  const fmtBRL = (v) => `R$ ${Number(v || 0).toFixed(2).replace('.', ',')}`;
+
+  resumoEl.textContent = `Período: ${filtros.de} → ${filtros.ate} · Pagamentos: ${pagamentos} · Fechamentos: ${fechamentos.length} · Total vendido: ${fmtBRL(totalVendido)} · Total recebido: ${fmtBRL(totalRecebido)} · Ticket médio: ${fmtBRL(ticketMedio)}`;
+}
+
+function _exportarProdutosVendidosCSV() {
+  const state = store.getState();
+  const perfil = store.getPerfilAcesso(state.usuarioAtivo?.papel);
+  if (!perfil?.tabs?.relatorios || !perfil?.acoes?.verRelatorios) return alert('Sem permissão.');
+  const { itens } = _getRelatorioHistoricoFiltrado(state);
+  const vendas = itens.filter(h => (h.tipoPagamento || 'fechamento') === 'fechamento');
+  if (vendas.length === 0) return alert('Nenhuma venda (fechamento) encontrada para o filtro selecionado.');
+
+  const byId = new Map();
+  vendas.forEach(h => {
+    (h.itens || []).forEach(it => {
+      const id = Number(it.id) || 0;
+      if (!id) return;
+      const prev = byId.get(id) || { id, qty: 0, valor: 0 };
+      prev.qty += Number(it.qty) || 0;
+      prev.valor += (Number(it.preco) || 0) * (Number(it.qty) || 0);
+      byId.set(id, prev);
+    });
+  });
+
+  const rows = Array.from(byId.values())
+    .map(r => {
+      const p = (state.produtos || []).find(x => x.id === r.id) || {};
+      return { ...r, nome: p.nome || '', cat: p.cat || '' };
+    })
+    .sort((a, b) => b.valor - a.valor);
+
+  let csv = 'ID;Produto;Categoria;Quantidade;Valor\n';
+  rows.forEach(r => {
+    csv += `${r.id};${String(r.nome || '').replace(/;/g, ',')};${String(r.cat || '').replace(/;/g, ',')};${r.qty};${r.valor.toFixed(2)}\n`;
+  });
+  _downloadCSV(csv, `relatorio_produtos_vendidos_${new Date().toISOString().slice(0, 10)}.csv`);
+}
+
+function _exportarCategoriasCSV() {
+  const state = store.getState();
+  const perfil = store.getPerfilAcesso(state.usuarioAtivo?.papel);
+  if (!perfil?.tabs?.relatorios || !perfil?.acoes?.verRelatorios) return alert('Sem permissão.');
+  const { itens } = _getRelatorioHistoricoFiltrado(state);
+  const vendas = itens.filter(h => (h.tipoPagamento || 'fechamento') === 'fechamento');
+  if (vendas.length === 0) return alert('Nenhuma venda (fechamento) encontrada para o filtro selecionado.');
+
+  const totais = {};
+  vendas.forEach(h => {
+    (h.itens || []).forEach(it => {
+      const p = (state.produtos || []).find(x => x.id === it.id);
+      const cat = p?.cat || 'Outros';
+      totais[cat] = (totais[cat] || 0) + (Number(it.preco) || 0) * (Number(it.qty) || 0);
+    });
+  });
+
+  const rows = Object.entries(totais).sort((a, b) => b[1] - a[1]);
+  let csv = 'Categoria;Valor\n';
+  rows.forEach(([cat, val]) => {
+    csv += `${String(cat || '').replace(/;/g, ',')};${Number(val || 0).toFixed(2)}\n`;
+  });
+  _downloadCSV(csv, `relatorio_categorias_${new Date().toISOString().slice(0, 10)}.csv`);
+}
+
+function _exportarPagamentosCSV() {
+  const state = store.getState();
+  const perfil = store.getPerfilAcesso(state.usuarioAtivo?.papel);
+  if (!perfil?.tabs?.relatorios || !perfil?.acoes?.verRelatorios) return alert('Sem permissão.');
+  const { itens } = _getRelatorioHistoricoFiltrado(state);
+  if (itens.length === 0) return alert('Nenhum pagamento encontrado para o filtro selecionado.');
+
+  const totais = {};
+  itens.forEach(h => {
+    const forma = h.formaPagamento || '—';
+    const val = (Number(h.valorPago) || Number(h.total) || 0);
+    totais[forma] = (totais[forma] || 0) + val;
+  });
+  const rows = Object.entries(totais).sort((a, b) => b[1] - a[1]);
+  let csv = 'FormaPagamento;Valor\n';
+  rows.forEach(([f, val]) => {
+    csv += `${String(f || '').replace(/;/g, ',')};${Number(val || 0).toFixed(2)}\n`;
+  });
+  _downloadCSV(csv, `relatorio_pagamentos_${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
 function _exportarEstoqueCSV() {
