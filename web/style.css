@@ -56,12 +56,25 @@ body {
 .logo { font-size: 16px; font-weight: 700; white-space: nowrap; font-family: var(--font-title); letter-spacing: 0.02em; }
 
 .user-badge {
+  position: relative;
   display: flex; align-items: center; gap: 8px;
   padding: 6px 12px; border-radius: 20px;
   background: var(--gray-light); cursor: pointer;
   font-size: 13px; transition: background 0.2s;
 }
 .user-badge:hover { background: #e8e6de; }
+.user-badge.save-pending::after,
+.user-badge.save-ok::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 2px;
+  background: #c3b6a5;
+}
+.user-badge.save-pending::after { background: #D9A441; }
+.user-badge.save-ok::after { background: #2FA15F; }
 
 .nav { display: flex; gap: 4px; }
 .nav-btn {
@@ -344,6 +357,15 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
     overflow: auto;
     -webkit-overflow-scrolling: touch;
     padding: 2px 0 8px;
+  }
+  .prod-search input {
+    width: 100%;
+    padding: 10px 12px;
+    border: var(--border);
+    border-radius: 12px;
+    font-family: var(--font);
+    font-size: 13px;
+    background: rgba(255, 255, 255, 0.9);
   }
   .chip {
     border: 1px solid #e0ddd6;

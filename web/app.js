@@ -22,6 +22,11 @@ let _supabaseInfoTs = 0;
 let _stateStream = null;
 let _stateStreamTs = 0;
 let _mobileProdCat = '';
+let _mobileProdQuery = '';
+let _activeUserIdCache = 0;
+let _pendingSave = false;
+let _lastSavedAt = 0;
+let _lastSaveError = '';
 
 // Reage a qualquer mudança de estado
 store.subscribe(render);
@@ -44,7 +49,13 @@ window.app = {
   addItemById(id)      { _addItemById(id); },
   setMobileProdCat(cat) {
     _mobileProdCat = String(cat || '').trim();
-    renderComanda(store.getState());
+    _persistMobileProdPrefs();
+    _applyMobileProdFilters();
+  },
+  setMobileProdQuery(q) {
+    _mobileProdQuery = String(q || '');
+    _persistMobileProdPrefs();
+    _applyMobileProdFilters();
   },
   changeQty(id, delta) { _changeQty(id, delta); },
   removeItem(id)       { _removeItem(id); },
@@ -116,6 +127,56 @@ function render(state) {
   renderFormasPagamento(state);
   renderUsuario(state);
   renderProducao(state);
+}
+
+function _persistMobileProdPrefs() {
+  const uid = Number(store.getState()?.usuarioAtivo?.id) || 0;
+  if (!uid) return;
+  try {
+    localStorage.setItem(`mobileProdCat:${uid}`, _mobileProdCat || '');
+    localStorage.setItem(`mobileProdQuery:${uid}`, _mobileProdQuery || '');
+  } catch {}
+}
+
+function _loadMobileProdPrefsForUser(userId) {
+  const uid = Number(userId) || 0;
+  if (!uid) return;
+  try {
+    _mobileProdCat = localStorage.getItem(`mobileProdCat:${uid}`) || '';
+    _mobileProdQuery = localStorage.getItem(`mobileProdQuery:${uid}`) || '';
+  } catch {}
+}
+
+function _applyMobileProdFilters() {
+  const body = document.getElementById('comanda-body');
+  if (!body) return;
+  const picker = body.querySelector('.prod-picker');
+  if (!picker) return;
+  const q = String(_mobileProdQuery || '').trim().toLowerCase();
+  const cat = String(_mobileProdCat || '').trim();
+  const btns = picker.querySelectorAll('.prod-btn');
+  let vis = 0;
+  btns.forEach((b) => {
+    const bCat = b.getAttribute('data-cat') || '';
+    const bNome = (b.getAttribute('data-nome') || '').toLowerCase();
+    const okCat = !cat || bCat === cat;
+    const okNome = !q || bNome.includes(q);
+    const show = okCat && okNome;
+    b.style.display = show ? '' : 'none';
+    if (show) vis += 1;
+  });
+
+  const empty = body.querySelector('#prod-empty');
+  if (empty) empty.style.display = vis ? 'none' : 'block';
+
+  const chips = body.querySelectorAll('.prod-filters .chip');
+  chips.forEach((c) => {
+    const v = c.getAttribute('data-cat') || '';
+    c.classList.toggle('active', v === cat);
+  });
+
+  const input = body.querySelector('#prod-search');
+  if (input && String(input.value || '') !== String(_mobileProdQuery || '')) input.value = _mobileProdQuery || '';
 }
 
 // Primeira renderização
@@ -282,6 +343,8 @@ let _saveFailShown = false;
 store.subscribe(() => {
   if (!carregadoDoServidor) return;
   if (_saveTimer) clearTimeout(_saveTimer);
+  _pendingSave = true;
+  _lastSaveError = '';
   _saveTimer = setTimeout(() => {
     const payloadState = store.exportarEstado();
     fetch('/api/state', {
@@ -308,11 +371,16 @@ store.subscribe(() => {
           _saveFailShown = false;
           _supabaseAtualizarStatus();
           _queueAutoExportCadastros();
+          _pendingSave = false;
+          _lastSavedAt = Date.now();
+          _lastSaveError = '';
           return;
         }
         if (!_saveFailShown) {
           _saveFailShown = true;
           _supabaseAtualizarStatus(true);
+          _pendingSave = true;
+          _lastSaveError = String(json?.error || 'erro desconhecido');
           alert(`Falha ao salvar no servidor: ${json?.error || 'erro desconhecido'}.\n\nSe estiver usando Supabase, verifique RLS/policies da tabela e se o servidor tem SUPABASE_SERVICE_ROLE_KEY.`);
         }
       })
@@ -482,16 +550,16 @@ function renderComanda(state) {
   ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const activeCat = cats.includes(_mobileProdCat) ? _mobileProdCat : '';
   if (_mobileProdCat && !activeCat) _mobileProdCat = '';
-  const disponiveisFiltrados = activeCat ? disponiveis.filter(p => p?.cat === activeCat) : disponiveis;
   const opcoesSelect = disponiveis
     .map(p => `<option value="${p.id}">${p.nome} — ${formatBRL(p.preco)}</option>`)
     .join('');
 
-  const gridProdutosHTML = disponiveisFiltrados
+  const escAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const gridProdutosHTML = disponiveis
     .slice()
     .sort((a, b) => String(a?.nome || '').localeCompare(String(b?.nome || ''), 'pt-BR'))
     .map(p => `
-      <button type="button" class="prod-btn" onclick="app.addItemById(${p.id})" title="Adicionar: ${p.nome}">
+      <button type="button" class="prod-btn" data-cat="${escAttr(p?.cat || '')}" data-nome="${escAttr(p?.nome || '')}" onclick="app.addItemById(${p.id})" title="Adicionar: ${p.nome}">
         ${p.imagem
           ? `<img class="thumb" src="${p.imagem}" alt="" onerror="this.style.display='none'">`
           : `<div class="thumb placeholder" title="Sem imagem">🖼️</div>`
@@ -504,12 +572,16 @@ function renderComanda(state) {
   const seletorProdutoHTML = isMobile
     ? `
       <div class="prod-filters" role="tablist" aria-label="Filtro de categorias">
-        <button type="button" class="chip ${activeCat ? '' : 'active'}" onclick="app.setMobileProdCat('')">Todas</button>
-        ${cats.map(c => `<button type="button" class="chip ${c === activeCat ? 'active' : ''}" onclick="app.setMobileProdCat(${JSON.stringify(c)})">${c}</button>`).join('')}
+        <button type="button" class="chip ${activeCat ? '' : 'active'}" data-cat="" onclick="app.setMobileProdCat('')">Todas</button>
+        ${cats.map(c => `<button type="button" class="chip ${c === activeCat ? 'active' : ''}" data-cat="${escAttr(c)}" onclick="app.setMobileProdCat(${JSON.stringify(c)})">${c}</button>`).join('')}
+      </div>
+      <div class="prod-search">
+        <input id="prod-search" type="search" placeholder="Buscar produto..." value="${escAttr(_mobileProdQuery || '')}" oninput="app.setMobileProdQuery(this.value)" />
       </div>
       <div class="prod-picker">
-        ${gridProdutosHTML || '<p class="empty-msg">Nenhum produto disponível.</p>'}
+        ${gridProdutosHTML}
       </div>
+      <p id="prod-empty" class="empty-msg" style="display:none">Nenhum produto encontrado.</p>
     `
     : `
       <div class="add-item-row">
@@ -565,6 +637,7 @@ function renderComanda(state) {
       </div>
     ` : ''}
   `;
+  if (isMobile) _applyMobileProdFilters();
 }
 
 // ─── Cardápio ─────────────────────────────────────────────────────────────────
@@ -791,7 +864,9 @@ function renderConfiguracoes(state) {
     const srvAt = Number(_serverInfo.updatedAt) || 0;
     const fmt = (ts) => ts ? new Date(ts).toLocaleString('pt-BR') : '—';
     const status = carregadoDoServidor ? 'OK' : 'Pausado';
-    sync.textContent = `Local rev ${localRev} (${fmt(localAt)}) · Servidor rev ${srvRev} (${fmt(srvAt)}) · ${status}`;
+    const saveTxt = _pendingSave ? 'PENDENTE' : (_lastSavedAt ? `SALVO (${fmt(_lastSavedAt)})` : '—');
+    const errTxt = _lastSaveError ? ` · Erro: ${_lastSaveError}` : '';
+    sync.textContent = `Local rev ${localRev} (${fmt(localAt)}) · Servidor rev ${srvRev} (${fmt(srvAt)}) · ${status} · ${saveTxt}${errTxt}`;
   }
 
   const diffEl = document.getElementById('sync-diff');
@@ -1527,11 +1602,13 @@ function renderUsuario(state) {
   const user = state.usuarioAtivo;
   const nameEl = document.getElementById('user-name');
   const roleEl = document.getElementById('user-role');
+  const badgeEl = document.getElementById('user-badge');
 
   if (!user) {
     nameEl.textContent = 'Entrar';
     roleEl.textContent = '';
     roleEl.className = 'badge badge-gray';
+    if (badgeEl) badgeEl.classList.remove('save-pending', 'save-ok');
     document.querySelectorAll('.nav-btn').forEach(btn => { btn.style.display = 'none'; });
     return;
   }
@@ -1548,6 +1625,17 @@ function renderUsuario(state) {
     cliente: 'green'
   };
   roleEl.className = `badge badge-${roleColors[user.papel] || 'gray'}`;
+
+  if (Number(user?.id) !== Number(_activeUserIdCache)) {
+    _activeUserIdCache = Number(user?.id) || 0;
+    _loadMobileProdPrefsForUser(_activeUserIdCache);
+    renderComanda(store.getState());
+  }
+
+  if (badgeEl) {
+    badgeEl.classList.toggle('save-pending', !!_pendingSave);
+    badgeEl.classList.toggle('save-ok', !_pendingSave && !!_lastSavedAt);
+  }
   
   const tabs = perfil?.tabs || {};
   document.querySelectorAll('.nav-btn').forEach(btn => {
