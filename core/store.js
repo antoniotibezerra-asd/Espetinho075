@@ -842,8 +842,10 @@ export function criarStore() {
     if (user.senhaHash) {
       const tentativa = normalizarTexto(senha);
       const salt = normalizarTexto(user.senhaSalt);
-      const hash = sha256Hex(`${salt}:${tentativa}`);
-      if (hash !== user.senhaHash) throw new Error('Senha inválida.');
+      const hashSalted = sha256Hex(`${salt}:${tentativa}`);
+      const hashPlain = sha256Hex(`${tentativa}`);
+      const ok = (hashSalted === user.senhaHash) || (!salt && hashPlain === user.senhaHash);
+      if (!ok) throw new Error('Senha inválida.');
     }
     const token = randomToken(16);
     const ts = Date.now();
@@ -1043,7 +1045,9 @@ export function criarStore() {
         id: u.id,
         nome: u.nome,
         papel: u.papel,
-        senhaHash: u.senhaHash || null,
+        senhaHash: (u.senhaHash && u.senhaSalt)
+          ? `v1$${String(u.senhaSalt)}$${String(u.senhaHash)}`
+          : (u.senhaHash || null),
         descontoPctMax: Number.isFinite(Number(u.descontoPctMax)) ? Math.max(0, Math.min(100, Number(u.descontoPctMax))) : 0,
         descontoValorMax: Number.isFinite(Number(u.descontoValorMax)) ? Math.max(0, Number(u.descontoValorMax)) : 0,
       })),
@@ -1143,11 +1147,22 @@ export function criarStore() {
       if (!Number.isFinite(Number(out.descontoValorMax))) out.descontoValorMax = 0;
       out.descontoPctMax = Math.max(0, Math.min(100, Number(out.descontoPctMax)));
       out.descontoValorMax = Math.max(0, Number(out.descontoValorMax));
+      if (typeof out.senhaHash === 'string' && out.senhaHash.startsWith('v1$')) {
+        const parts = out.senhaHash.split('$');
+        const salt = parts[1] || '';
+        const hash = parts[2] || '';
+        out.senhaSalt = salt;
+        out.senhaHash = hash;
+      }
       if (out.senha && !out.senhaHash) {
         const salt = randomToken(8);
         out.senhaSalt = salt;
         out.senhaHash = sha256Hex(`${salt}:${String(out.senha)}`);
         delete out.senha;
+      }
+      if (out.senhaHash && !normalizarTexto(out.senhaSalt)) {
+        out.senhaSalt = '';
+        out.senhaHash = '';
       }
       return out;
     });
