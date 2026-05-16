@@ -583,10 +583,13 @@ function renderComanda(state) {
   }
 
   const mesa  = state.mesas[n];
-  const subtotal = store.calcTotalMesa(mesa.itens);
-  const taxa = mesa.aplicarTaxa ? subtotal * 0.1 : 0;
-  const credito = mesa.credito || 0;
-  const saldo = Math.max(0, subtotal + taxa - credito);
+  const resumo = store.calcResumoMesa(mesa, { aplicarTaxa: !!mesa.aplicarTaxa });
+  const subtotal = resumo.subtotal;
+  const taxa = resumo.taxaServico;
+  const taxaEntrega = resumo.taxaEntrega || 0;
+  const total = resumo.total;
+  const credito = resumo.credito || 0;
+  const saldo = resumo.saldo;
 
   title.textContent = `${mesa.tipo === 'online' ? 'Pedido Online' : 'Mesa'} ${n}`;
   btnFec.style.display = 'flex';
@@ -689,8 +692,29 @@ function renderComanda(state) {
         </div>
       `).join('');
 
+  const cliente = (mesa?.cliente && typeof mesa.cliente === 'object') ? mesa.cliente : null;
+  const clienteInfoHTML = (mesa.tipo === 'online' && cliente)
+    ? `
+      <div class="simple-item" style="margin-bottom:10px; gap:10px; align-items:flex-start">
+        <span>
+          <b>Cliente:</b> ${escAttr(cliente.apelido || cliente.nome || '-')}${cliente.nome && cliente.apelido ? ` (${escAttr(cliente.nome)})` : ''}<br>
+          <span style="color:#555; font-size:12px">
+            ${cliente.telefone ? `WhatsApp: ${escAttr(cliente.telefone)}` : ''}
+            ${cliente.entregaTipo ? ` · ${cliente.entregaTipo === 'retirada' ? 'Retirada' : 'Entrega'}` : ''}
+            ${cliente.formaPagamento ? ` · Pgto: ${escAttr(cliente.formaPagamento)}` : ''}
+          </span>
+          ${cliente.entregaTipo !== 'retirada' && (cliente.enderecoTexto || cliente.mapsUrl) ? `<br><span style="color:#555; font-size:12px">Endereço: ${escAttr(cliente.enderecoTexto || cliente.mapsUrl)}</span>` : ''}
+          ${cliente.entregaTipo !== 'retirada' && cliente.referencia ? `<br><span style="color:#555; font-size:12px">Ref: ${escAttr(cliente.referencia)}</span>` : ''}
+          ${cliente.formaPagamento && String(cliente.formaPagamento).toLowerCase().includes('dinheiro') && (Number.isFinite(Number(cliente.trocoPara)) && Number(cliente.trocoPara) >= 0) ? `<br><span style="color:#555; font-size:12px">Troco: R$ ${Number(cliente.trocoPara).toFixed(2).replace('.', ',')}</span>` : ''}
+          ${cliente.observacao ? `<br><span style="color:#555; font-size:12px">Obs: ${escAttr(cliente.observacao)}</span>` : ''}
+        </span>
+      </div>
+    `
+    : '';
+
   body.innerHTML = `
     ${seletorProdutoHTML}
+    ${clienteInfoHTML}
     <hr style="border:none;border-top:1px solid #ece9e2;margin-bottom:12px"/>
     <div class="item-list">${itensHTML}</div>
     <div class="total-bar">
@@ -698,18 +722,37 @@ function renderComanda(state) {
       <div class="spacer"></div>
       <span class="total-val">${formatBRL(subtotal)}</span>
     </div>
+    ${taxaEntrega > 0 ? `
+      <div class="total-bar" style="margin-top:8px">
+        <span class="total-label">Entrega</span>
+        <div class="spacer"></div>
+        <span class="total-val" style="font-size:14px">${formatBRL(taxaEntrega)}</span>
+      </div>
+    ` : ''}
+    ${taxa > 0 ? `
+      <div class="total-bar" style="margin-top:8px">
+        <span class="total-label">Taxa Serviço</span>
+        <div class="spacer"></div>
+        <span class="total-val" style="font-size:14px">${formatBRL(taxa)}</span>
+      </div>
+    ` : ''}
+    <div class="total-bar" style="margin-top:8px">
+      <span class="total-label">Total</span>
+      <div class="spacer"></div>
+      <span class="total-val" style="font-size:14px">${formatBRL(total)}</span>
+    </div>
     ${credito > 0 ? `
       <div class="total-bar" style="margin-top:8px">
         <span class="total-label">Pago</span>
         <div class="spacer"></div>
         <span class="total-val" style="font-size:14px">${formatBRL(credito)}</span>
       </div>
-      <div class="total-bar" style="margin-top:8px">
-        <span class="total-label">Saldo</span>
-        <div class="spacer"></div>
-        <span class="total-val" style="font-size:14px">${formatBRL(saldo)}</span>
-      </div>
     ` : ''}
+    <div class="total-bar" style="margin-top:8px">
+      <span class="total-label">Saldo</span>
+      <div class="spacer"></div>
+      <span class="total-val" style="font-size:14px">${formatBRL(saldo)}</span>
+    </div>
   `;
   if (isMobile) _applyMobileProdFilters();
 }
@@ -878,11 +921,13 @@ function renderConfiguracoes(state) {
 
   const tel = document.getElementById('f-empresa-telefone');
   const end = document.getElementById('f-empresa-endereco');
+  const taxaEntrega = document.getElementById('f-empresa-taxa-entrega');
   const pix = document.getElementById('f-empresa-pix');
   const rod = document.getElementById('f-empresa-rodape');
   const emp = state.empresa || {};
   if (tel && tel.value !== String(emp.telefone || '')) tel.value = String(emp.telefone || '');
   if (end && end.value !== String(emp.endereco || '')) end.value = String(emp.endereco || '');
+  if (taxaEntrega && taxaEntrega.value !== String(Number(emp.taxaEntregaPadrao || 0))) taxaEntrega.value = String(Number(emp.taxaEntregaPadrao || 0));
   if (pix && pix.value !== String(emp.pixCopiaECola || '')) pix.value = String(emp.pixCopiaECola || '');
   if (rod && rod.value !== String(emp.mensagemRodape || '')) rod.value = String(emp.mensagemRodape || '');
 
@@ -1013,6 +1058,7 @@ function _salvarEmpresa() {
     store.atualizarEmpresa({
       telefone: document.getElementById('f-empresa-telefone')?.value || '',
       endereco: document.getElementById('f-empresa-endereco')?.value || '',
+      taxaEntregaPadrao: parseFloat(String(document.getElementById('f-empresa-taxa-entrega')?.value || '').replace(',', '.')) || 0,
       pixCopiaECola: document.getElementById('f-empresa-pix')?.value || '',
       mensagemRodape: document.getElementById('f-empresa-rodape')?.value || '',
     });
@@ -1581,19 +1627,101 @@ function _bootClienteMode() {
   root.className = 'cliente-root';
   document.body.appendChild(root);
 
-  const mesaId = Number(_urlParams.get('mesa')) || 0;
-  const token = String(_urlParams.get('token') || '').trim();
-  const tituloMesa = mesaId ? `Mesa ${mesaId}` : 'Pedido Online';
+  const _flowKind = (Number(_urlParams.get('mesa')) || 0) ? 'mesa' : 'online';
+  let mesaId = Number(_urlParams.get('mesa')) || 0;
+  let token = String(_urlParams.get('token') || '').trim();
+  let clienteNome = '';
+  let clienteTelefone = '';
+  let clienteApelido = '';
+  let clienteEntregaTipo = 'entrega';
+  let clienteEnderecoTexto = '';
+  let clienteReferencia = '';
+  let clienteMapsUrl = '';
+  let clienteLat = '';
+  let clienteLng = '';
+  let clienteFormaPagamento = '';
+  let clienteTrocoPara = '';
+  let clienteObservacao = '';
+  try {
+    clienteNome = localStorage.getItem('clienteNome') || '';
+    clienteTelefone = localStorage.getItem('clienteTelefone') || '';
+    clienteApelido = localStorage.getItem('clienteApelido') || '';
+    clienteEntregaTipo = localStorage.getItem('clienteEntregaTipo') || 'entrega';
+    clienteEnderecoTexto = localStorage.getItem('clienteEnderecoTexto') || '';
+    clienteReferencia = localStorage.getItem('clienteReferencia') || '';
+    clienteMapsUrl = localStorage.getItem('clienteMapsUrl') || '';
+    clienteLat = localStorage.getItem('clienteLat') || '';
+    clienteLng = localStorage.getItem('clienteLng') || '';
+    clienteFormaPagamento = localStorage.getItem('clienteFormaPagamento') || '';
+    clienteTrocoPara = localStorage.getItem('clienteTrocoPara') || '';
+    clienteObservacao = localStorage.getItem('clienteObservacao') || '';
+  } catch {}
 
   const cart = new Map();
-  let menu = { empresa: null, categorias: [], produtos: [] };
+  let menu = { empresa: null, categorias: [], formasPagamento: [], produtos: [] };
   let cat = '';
   let q = '';
   let status = '';
+  let orderInfo = null;
+  let orderItens = [];
+  let _statusTimer = null;
+
+  function _tituloMesa() {
+    return mesaId ? `Pedido ${mesaId}` : 'Pedido Online';
+  }
+
+  function _normalizarTelefoneBR(v) {
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    let d = raw.replace(/\D+/g, '');
+    if (!d) return '';
+    if (d.startsWith('00')) d = d.slice(2);
+    if (d.startsWith('0')) d = d.replace(/^0+/, '');
+    if (d.startsWith('55')) return d;
+    if (d.length === 10 || d.length === 11) return `55${d}`;
+    return d;
+  }
+
+  async function _fetchStatus() {
+    if (!mesaId || !token) return;
+    try {
+      const r = await fetch(`/api/client/order-status?mesaId=${encodeURIComponent(String(mesaId))}&token=${encodeURIComponent(String(token))}`, { cache: 'no-store' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) return;
+      orderInfo = { mesa: j?.mesa || null, status: j?.status || null };
+      orderItens = Array.isArray(j?.itens) ? j.itens : [];
+      renderCliente();
+    } catch {}
+  }
+
+  function _ensureStatusTimer() {
+    if (!mesaId || !token) return;
+    if (_statusTimer) return;
+    _fetchStatus();
+    _statusTimer = setInterval(_fetchStatus, 3500);
+  }
+
+  function _persistCliente() {
+    try {
+      localStorage.setItem('clienteNome', String(clienteNome || ''));
+      localStorage.setItem('clienteTelefone', String(clienteTelefone || ''));
+      localStorage.setItem('clienteApelido', String(clienteApelido || ''));
+      localStorage.setItem('clienteEntregaTipo', String(clienteEntregaTipo || 'entrega'));
+      localStorage.setItem('clienteEnderecoTexto', String(clienteEnderecoTexto || ''));
+      localStorage.setItem('clienteReferencia', String(clienteReferencia || ''));
+      localStorage.setItem('clienteMapsUrl', String(clienteMapsUrl || ''));
+      localStorage.setItem('clienteLat', String(clienteLat || ''));
+      localStorage.setItem('clienteLng', String(clienteLng || ''));
+      localStorage.setItem('clienteFormaPagamento', String(clienteFormaPagamento || ''));
+      localStorage.setItem('clienteTrocoPara', String(clienteTrocoPara || ''));
+      localStorage.setItem('clienteObservacao', String(clienteObservacao || ''));
+    } catch {}
+  }
 
   function renderCliente() {
     const empresaNome = (menu?.empresa?.nome || 'Espetinho 075').trim();
     const cats = Array.isArray(menu?.categorias) ? menu.categorias.filter(Boolean) : [];
+    const pgs = Array.isArray(menu?.formasPagamento) ? menu.formasPagamento.filter(Boolean) : [];
     const produtos = Array.isArray(menu?.produtos) ? menu.produtos : [];
 
     const qNorm = String(q || '').trim().toLowerCase();
@@ -1613,13 +1741,52 @@ function _bootClienteMode() {
         return { ...it, nome: p.nome, preco: Number(p.preco) || 0 };
       })
       .filter(Boolean);
-    const total = cartDetalhes.reduce((soma, it) => soma + (Number(it.preco) || 0) * (Number(it.qty) || 0), 0);
+    const subtotalCart = cartDetalhes.reduce((soma, it) => soma + (Number(it.preco) || 0) * (Number(it.qty) || 0), 0);
+
+    const statusLabel = String(orderInfo?.status?.label || '').trim();
+    const showStatus = !!(mesaId && token && (statusLabel || orderItens.length));
+    const isOnlineFlow = _flowKind === 'online';
+    const ent = (String(clienteEntregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
+    const showEndereco = isOnlineFlow && ent !== 'retirada';
+    const pgLower = String(clienteFormaPagamento || '').toLowerCase();
+    const showTroco = isOnlineFlow && pgLower.includes('dinheiro');
+    const taxaPadrao = Number.isFinite(Number(menu?.empresa?.taxaEntregaPadrao)) ? Math.max(0, Number(menu.empresa.taxaEntregaPadrao)) : 0;
+    const taxaEfetivaMesa = Number.isFinite(Number(orderInfo?.mesa?.taxaEntrega)) ? Math.max(0, Number(orderInfo.mesa.taxaEntrega)) : null;
+    const taxaEntregaEfetiva = showEndereco ? (taxaEfetivaMesa !== null ? taxaEfetivaMesa : taxaPadrao) : 0;
+    const totalFinal = subtotalCart + taxaEntregaEfetiva;
+
+    const empresaTel = String(menu?.empresa?.telefone || '').trim();
+    const empresaTelNorm = _normalizarTelefoneBR(empresaTel);
+    const trackUrl = (mesaId && token) ? `${window.location.origin}${window.location.pathname}?cliente=1&mesa=${encodeURIComponent(String(mesaId))}&token=${encodeURIComponent(String(token))}` : '';
+    const waMsg = mesaId ? `Olá! Quero falar sobre o Pedido Nº ${mesaId}.` : 'Olá! Quero fazer um pedido.';
+    const waLink = empresaTelNorm ? `https://wa.me/${encodeURIComponent(empresaTelNorm)}?text=${encodeURIComponent(waMsg)}` : '';
 
     root.innerHTML = `
       <div class="cliente-top">
         <div class="cliente-title">${empresaNome}</div>
-        <div class="cliente-sub">${tituloMesa}</div>
+        <div class="cliente-sub">${_tituloMesa()}</div>
       </div>
+
+      ${showStatus ? `
+        <div class="card cliente-card" style="margin-bottom:12px">
+          <div class="row" style="justify-content:space-between; margin-bottom:8px">
+            <div style="font-weight:800">Status</div>
+            <span class="badge badge-${statusLabel === 'Pronto' ? 'green' : statusLabel === 'Em preparo' ? 'amber' : 'blue'}">${statusLabel || '—'}</span>
+          </div>
+          <div class="row" style="gap:8px; margin-bottom:10px; flex-wrap:wrap; justify-content:flex-end">
+            ${trackUrl ? `<button class="btn btn-sm" id="cliente-copiar-link">🔗 Copiar link</button>` : ''}
+            ${waLink ? `<a class="btn btn-sm btn-primary" href="${waLink}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+          </div>
+          <div class="simple-list" style="gap:6px; margin-top:0">
+            ${(orderItens || []).slice(0, 20).map(it => `
+              <div class="simple-item">
+                <span>${it.qty}x ${it.nome}</span>
+                <span class="badge badge-${String(it.status||'').toLowerCase()==='entregue'?'green':String(it.status||'').toLowerCase()==='preparando'?'amber':'gray'}">${it.status}</span>
+              </div>
+            `).join('') || `<div class="empty-msg" style="padding:8px 0">Atualizando...</div>`}
+          </div>
+        </div>
+      ` : ''}
 
       <div class="card cliente-card">
         <div class="prod-search"><input id="cliente-busca" type="search" placeholder="Buscar..." value="${String(q || '').replace(/"/g, '&quot;')}" /></div>
@@ -1644,10 +1811,90 @@ function _bootClienteMode() {
       </div>
 
       <div class="card cliente-card" style="margin-top:12px">
+        <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+          <div class="form-group" style="flex:1; min-width:180px">
+            <label style="font-size:12px; font-weight:700; color:#666">Seu nome</label>
+            <input id="cliente-nome" type="text" placeholder="Ex: João" value="${String(clienteNome || '').replace(/"/g, '&quot;')}" />
+          </div>
+          <div class="form-group" style="flex:1; min-width:180px">
+            <label style="font-size:12px; font-weight:700; color:#666">Como quer ser chamado</label>
+            <input id="cliente-apelido" type="text" placeholder="Ex: Joãozinho" value="${String(clienteApelido || '').replace(/"/g, '&quot;')}" />
+          </div>
+          <div class="form-group" style="flex:1; min-width:180px">
+            <label style="font-size:12px; font-weight:700; color:#666">WhatsApp</label>
+            <input id="cliente-telefone" type="tel" placeholder="Ex: (75) 99999-9999" value="${String(clienteTelefone || '').replace(/"/g, '&quot;')}" />
+          </div>
+        </div>
+
+        ${isOnlineFlow ? `
+          <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+            <div class="form-group" style="flex:1; min-width:180px">
+              <label style="font-size:12px; font-weight:700; color:#666">Entrega ou Retirada</label>
+              <select id="cliente-entrega-tipo" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">
+                <option value="entrega" ${ent === 'entrega' ? 'selected' : ''}>Entrega</option>
+                <option value="retirada" ${ent === 'retirada' ? 'selected' : ''}>Retirada</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1; min-width:180px">
+              <label style="font-size:12px; font-weight:700; color:#666">Forma de pagamento</label>
+              <select id="cliente-pagamento" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">
+                <option value="">Selecione...</option>
+                ${(pgs.length ? pgs : ['Dinheiro', 'PIX', 'Cartão']).map(pg => `<option value="${String(pg).replace(/"/g, '&quot;')}" ${String(clienteFormaPagamento||'')===String(pg)?'selected':''}>${pg}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          ${showEndereco ? `
+            <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+              <div class="form-group" style="flex:2; min-width:220px">
+                <label style="font-size:12px; font-weight:700; color:#666">Endereço completo</label>
+                <textarea id="cliente-endereco" rows="2" placeholder="Rua, número, bairro, cidade" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">${String(clienteEnderecoTexto || '').replace(/</g, '&lt;')}</textarea>
+              </div>
+              <div class="form-group" style="flex:1; min-width:180px">
+                <label style="font-size:12px; font-weight:700; color:#666">Ponto de referência</label>
+                <input id="cliente-referencia" type="text" placeholder="Ex: perto da farmácia" value="${String(clienteReferencia || '').replace(/"/g, '&quot;')}" />
+              </div>
+            </div>
+            <div class="row" style="gap:8px; margin-bottom:10px; flex-wrap:wrap; justify-content:flex-end">
+              <button class="btn btn-sm" id="cliente-geo">📍 Usar localização atual</button>
+              <button class="btn btn-sm" id="cliente-maps">🗺️ Abrir Maps</button>
+            </div>
+            <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+              <div class="form-group" style="flex:1; min-width:220px">
+                <label style="font-size:12px; font-weight:700; color:#666">Link do Maps (opcional)</label>
+                <input id="cliente-maps-url" type="url" placeholder="Cole aqui o link compartilhado" value="${String(clienteMapsUrl || '').replace(/"/g, '&quot;')}" />
+              </div>
+            </div>
+          ` : ''}
+
+          ${showTroco ? `
+            <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+              <div class="form-group" style="flex:1; min-width:180px">
+                <label style="font-size:12px; font-weight:700; color:#666">Troco para (R$)</label>
+                <input id="cliente-troco" type="number" placeholder="0.00" min="0" step="0.01" value="${String(clienteTrocoPara || '').replace(/"/g, '&quot;')}" />
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+            <div class="form-group" style="flex:1; min-width:220px">
+              <label style="font-size:12px; font-weight:700; color:#666">Observações (opcional)</label>
+              <textarea id="cliente-obs" rows="2" placeholder="Ex: sem cebola, caprichar no molho...">${String(clienteObservacao || '').replace(/</g, '&lt;')}</textarea>
+            </div>
+          </div>
+        ` : ''}
+
         <div class="row" style="justify-content:space-between; margin-bottom:10px">
           <div style="font-weight:700">Seu pedido</div>
-          <div class="badge badge-blue">${formatBRL(total)}</div>
+          <div class="badge badge-blue">${formatBRL(totalFinal)}</div>
         </div>
+        ${taxaEntregaEfetiva > 0 ? `
+          <div class="total-bar" style="margin-bottom:10px">
+            <span class="total-label">Entrega</span>
+            <div class="spacer"></div>
+            <span class="total-val">${formatBRL(taxaEntregaEfetiva)}</span>
+          </div>
+        ` : ''}
         <div id="cliente-cart">
           ${cartDetalhes.length
             ? cartDetalhes.map(it => `
@@ -1678,6 +1925,140 @@ function _bootClienteMode() {
     if (busca) {
       busca.addEventListener('input', (e) => {
         q = String(e.target.value || '');
+        renderCliente();
+      });
+    }
+
+    const inpNome = root.querySelector('#cliente-nome');
+    if (inpNome) {
+      inpNome.addEventListener('input', (e) => {
+        clienteNome = String(e.target.value || '');
+        _persistCliente();
+      });
+    }
+    const inpApelido = root.querySelector('#cliente-apelido');
+    if (inpApelido) {
+      inpApelido.addEventListener('input', (e) => {
+        clienteApelido = String(e.target.value || '');
+        _persistCliente();
+      });
+    }
+    const inpTel = root.querySelector('#cliente-telefone');
+    if (inpTel) {
+      inpTel.addEventListener('input', (e) => {
+        clienteTelefone = String(e.target.value || '');
+        _persistCliente();
+      });
+    }
+    const selEntrega = root.querySelector('#cliente-entrega-tipo');
+    if (selEntrega) {
+      selEntrega.addEventListener('change', (e) => {
+        clienteEntregaTipo = String(e.target.value || 'entrega');
+        _persistCliente();
+        renderCliente();
+      });
+    }
+    const selPg = root.querySelector('#cliente-pagamento');
+    if (selPg) {
+      selPg.addEventListener('change', (e) => {
+        clienteFormaPagamento = String(e.target.value || '');
+        if (!String(clienteFormaPagamento || '').toLowerCase().includes('dinheiro')) clienteTrocoPara = '';
+        _persistCliente();
+        renderCliente();
+      });
+    }
+    const taEnd = root.querySelector('#cliente-endereco');
+    if (taEnd) {
+      taEnd.addEventListener('input', (e) => {
+        clienteEnderecoTexto = String(e.target.value || '');
+        _persistCliente();
+      });
+    }
+    const inpRef = root.querySelector('#cliente-referencia');
+    if (inpRef) {
+      inpRef.addEventListener('input', (e) => {
+        clienteReferencia = String(e.target.value || '');
+        _persistCliente();
+      });
+    }
+    const inpMapsUrl = root.querySelector('#cliente-maps-url');
+    if (inpMapsUrl) {
+      inpMapsUrl.addEventListener('input', (e) => {
+        clienteMapsUrl = String(e.target.value || '');
+        _persistCliente();
+      });
+    }
+    const inpTroco = root.querySelector('#cliente-troco');
+    if (inpTroco) {
+      inpTroco.addEventListener('input', (e) => {
+        clienteTrocoPara = String(e.target.value || '');
+        _persistCliente();
+      });
+    }
+    const taObs = root.querySelector('#cliente-obs');
+    if (taObs) {
+      taObs.addEventListener('input', (e) => {
+        clienteObservacao = String(e.target.value || '');
+        _persistCliente();
+      });
+    }
+    const btnGeo = root.querySelector('#cliente-geo');
+    if (btnGeo) {
+      btnGeo.addEventListener('click', () => {
+        if (!navigator.geolocation) {
+          status = 'Geolocalização não disponível.';
+          renderCliente();
+          return;
+        }
+        status = 'Capturando localização...';
+        renderCliente();
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const la = Number(pos?.coords?.latitude);
+            const lo = Number(pos?.coords?.longitude);
+            if (!Number.isFinite(la) || !Number.isFinite(lo)) {
+              status = 'Não foi possível obter a localização.';
+              renderCliente();
+              return;
+            }
+            clienteLat = String(la);
+            clienteLng = String(lo);
+            clienteMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${la},${lo}`)}`;
+            _persistCliente();
+            status = 'Localização capturada.';
+            renderCliente();
+          },
+          () => {
+            status = 'Permissão de localização negada.';
+            renderCliente();
+          },
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      });
+    }
+    const btnMaps = root.querySelector('#cliente-maps');
+    if (btnMaps) {
+      btnMaps.addEventListener('click', () => {
+        const la = Number(clienteLat);
+        const lo = Number(clienteLng);
+        const url = (Number.isFinite(la) && Number.isFinite(lo))
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${la},${lo}`)}`
+          : 'https://www.google.com/maps';
+        try { window.open(url, '_blank'); } catch { window.location.href = url; }
+      });
+    }
+
+    const btnCopiar = root.querySelector('#cliente-copiar-link');
+    if (btnCopiar) {
+      btnCopiar.addEventListener('click', async () => {
+        if (!trackUrl) return;
+        try {
+          await navigator.clipboard?.writeText?.(trackUrl);
+          status = 'Link copiado.';
+        } catch {
+          try { window.prompt('Copie o link:', trackUrl); } catch {}
+          status = 'Link pronto para copiar.';
+        }
         renderCliente();
       });
     }
@@ -1746,13 +2127,42 @@ function _bootClienteMode() {
           renderCliente();
           return;
         }
+        if (!mesaId) {
+          if (!String(clienteNome || '').trim()) { status = 'Informe seu nome.'; renderCliente(); return; }
+          if (!String(clienteTelefone || '').trim()) { status = 'Informe seu WhatsApp/telefone.'; renderCliente(); return; }
+          if (isOnlineFlow) {
+            const entNow = (String(clienteEntregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
+            const hasLatLng = Number.isFinite(Number(clienteLat)) && Number.isFinite(Number(clienteLng));
+            const hasEndereco = !!String(clienteEnderecoTexto || '').trim() || !!String(clienteMapsUrl || '').trim() || hasLatLng;
+            if (entNow === 'entrega' && !hasEndereco) { status = 'Informe o endereço de entrega.'; renderCliente(); return; }
+            if (!String(clienteFormaPagamento || '').trim()) { status = 'Escolha a forma de pagamento.'; renderCliente(); return; }
+          }
+        }
         status = 'Enviando...';
         renderCliente();
         try {
           const r = await fetch('/api/client/order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mesaId: mesaId || 0, token: token || '', itens: payloadItens }),
+            body: JSON.stringify({
+              mesaId: mesaId || 0,
+              token: token || '',
+              itens: payloadItens,
+              cliente: {
+                nome: clienteNome,
+                telefone: clienteTelefone,
+                apelido: clienteApelido,
+                entregaTipo: clienteEntregaTipo,
+                enderecoTexto: clienteEnderecoTexto,
+                referencia: clienteReferencia,
+                mapsUrl: clienteMapsUrl,
+                lat: clienteLat,
+                lng: clienteLng,
+                formaPagamento: clienteFormaPagamento,
+                trocoPara: clienteTrocoPara,
+                observacao: clienteObservacao,
+              },
+            }),
           });
           const j = await r.json().catch(() => ({}));
           if (!r.ok || !j?.ok) {
@@ -1762,10 +2172,18 @@ function _bootClienteMode() {
           }
           cart.clear();
           const newMesaId = Number(j?.mesaId) || 0;
-          status = newMesaId && !mesaId
-            ? `Pedido enviado! Número: ${newMesaId}.`
-            : 'Pedido enviado! Aguarde o atendimento.';
+          const newToken = String(j?.token || '').trim();
+          if (!mesaId && newMesaId && newToken) {
+            mesaId = newMesaId;
+            token = newToken;
+            try {
+              history.replaceState(null, '', `?cliente=1&mesa=${encodeURIComponent(String(mesaId))}&token=${encodeURIComponent(String(token))}`);
+            } catch {}
+          }
+          const label = String(j?.status?.label || '').trim();
+          status = newMesaId ? `Pedido enviado! Nº ${newMesaId}${label ? ` · ${label}` : ''}.` : 'Pedido enviado!';
           renderCliente();
+          _ensureStatusTimer();
         } catch (e) {
           status = 'Sem conexão. Tente novamente.';
           renderCliente();
@@ -1780,6 +2198,7 @@ function _bootClienteMode() {
       if (!j?.ok) throw new Error(j?.error || 'Falha ao carregar cardápio.');
       menu = j?.data || { empresa: null, categorias: [], produtos: [] };
       renderCliente();
+      _ensureStatusTimer();
     })
     .catch(() => {
       status = 'Falha ao carregar cardápio.';
@@ -2269,12 +2688,14 @@ function _imprimirComanda(aplicarTaxa = true) {
   const n = state.mesaSelecionada;
   if (!n) return;
   const mesa = state.mesas[n];
-  const subtotal = store.calcTotalMesa(mesa.itens);
   const aplicarTaxaEfetiva = mesa.aplicarTaxa || aplicarTaxa;
-  const vTaxa = aplicarTaxaEfetiva ? subtotal * 0.1 : 0;
-  const credito = mesa.credito || 0;
-  const total = subtotal + vTaxa;
-  const saldo = Math.max(0, total - credito);
+  const resumo = store.calcResumoMesa(mesa, { aplicarTaxa: !!aplicarTaxaEfetiva });
+  const subtotal = resumo.subtotal;
+  const vTaxa = resumo.taxaServico;
+  const vEntrega = resumo.taxaEntrega || 0;
+  const credito = resumo.credito || 0;
+  const total = resumo.total;
+  const saldo = resumo.saldo;
   const labelCredito = saldo === 0 ? 'PAGO' : 'PAG. PARCIAL';
   
   const printArea = document.getElementById('print-area');
@@ -2297,6 +2718,11 @@ function _imprimirComanda(aplicarTaxa = true) {
         <span>SUBTOTAL</span>
         <span>${formatBRL(subtotal)}</span>
       </div>
+      ${vEntrega > 0 ? `
+      <div class="ticket-row">
+        <span>ENTREGA</span>
+        <span>${formatBRL(vEntrega)}</span>
+      </div>` : ''}
       ${aplicarTaxaEfetiva ? `
       <div class="ticket-row">
         <span>TAXA SERV. (10%)</span>
@@ -2344,6 +2770,7 @@ function _imprimirReciboHistorico(idx) {
     descontoPct: Number(h.descontoPct) || 0,
     descontoValor: Number(h.descontoValor) || 0,
     taxaServico: h.taxaServico,
+    taxaEntrega: Number(h.taxaEntrega) || 0,
     total: h.total,
     valorPago: (typeof h.valorPago === 'number') ? h.valorPago : h.total,
     saldoRestante: (typeof h.saldoRestante === 'number') ? h.saldoRestante : 0,
@@ -2399,6 +2826,11 @@ function _imprimirRecibo(info, { via = '', somentePagamento = false } = {}) {
       <div class="ticket-row">
         <span>DESCONTO${info.descontoTipo === 'pct' && (info.descontoPct || 0) > 0 ? ` (${info.descontoPct}%)` : ''}</span>
         <span>- ${formatBRL(info.descontoValor)}</span>
+      </div>` : ''}
+      ${(info.taxaEntrega || 0) > 0 ? `
+      <div class="ticket-row">
+        <span>ENTREGA</span>
+        <span>${formatBRL(info.taxaEntrega)}</span>
       </div>` : ''}
       ${info.taxaServico > 0 ? `
       <div class="ticket-row">

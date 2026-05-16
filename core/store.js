@@ -13,7 +13,7 @@ const PAPEIS = ['gerente', 'garcom', 'cozinha', 'churrasqueiro', 'cliente'];
 function criarEstadoInicial() {
   const mesas = {};
   for (let i = 1; i <= MESAS_INICIAIS; i++) {
-    mesas[i] = { id: i, itens: [], status: 'livre', tipo: 'presencial', credito: 0, aplicarTaxa: false, token: '' };
+    mesas[i] = { id: i, itens: [], status: 'livre', tipo: 'presencial', credito: 0, aplicarTaxa: false, token: '', clienteId: null, cliente: null, createdAt: 0, taxaEntrega: 0 };
   }
   return {
     /**
@@ -83,6 +83,8 @@ function criarEstadoInicial() {
      */
     historico: [],          // { mesa, total, subtotal, taxaServico, formaPagamento, hora, itens[] }
     estoqueMov: [],
+    clientes: [],           // { id, nome, telefone, createdAt, lastMesaId }
+    proxClienteId: 1,
     /**
      * filaProducao: pedidos a serem preparados por setor (bar/cozinha/churrasco)
      */
@@ -95,6 +97,7 @@ function criarEstadoInicial() {
       pixCopiaECola: '',
       logoUrl: 'assets/logo.jpg',
       mensagemRodape: 'Obrigado pela preferência!',
+      taxaEntregaPadrao: 0,
     },
     aparencia: {
       fundoOpacidade: 0.90,
@@ -449,11 +452,12 @@ export function criarStore() {
 
     const baseTaxa = Math.max(0, subtotal - descontoValor);
     const taxaServico = aplicarTaxaEfetiva ? baseTaxa * 0.10 : 0;
-    const total = baseTaxa + taxaServico;
+    const taxaEntrega = Number.isFinite(Number(mesa?.taxaEntrega)) ? Math.max(0, Number(mesa.taxaEntrega)) : 0;
+    const total = baseTaxa + taxaServico + taxaEntrega;
     const credito = mesa.credito || 0;
     const saldo = Math.max(0, total - credito);
 
-    return { subtotal, aplicarTaxa: aplicarTaxaEfetiva, descontoValor, descontoPct: (tipo === 'pct' ? descontoPct : 0), taxaServico, total, credito, saldo };
+    return { subtotal, aplicarTaxa: aplicarTaxaEfetiva, descontoValor, descontoPct: (tipo === 'pct' ? descontoPct : 0), taxaServico, taxaEntrega, total, credito, saldo };
   }
 
   function setPermitirVendaSemEstoque(valor) {
@@ -662,6 +666,7 @@ export function criarStore() {
       descontoPct: resumo.descontoPct || 0,
       descontoValor: resumo.descontoValor || 0,
       taxaServico: resumo.taxaServico,
+      taxaEntrega: resumo.taxaEntrega || 0,
       total: resumo.total,
       valorPago: valor,
       saldoRestante,
@@ -678,7 +683,7 @@ export function criarStore() {
       state.mesas[mesaId] = { ...mesa, itens: [], status: 'livre', credito: 0, aplicarTaxa: false };
       if (state.mesaSelecionada === mesaId) state.mesaSelecionada = null;
     }
-    logAcao('caixa.pagamento', { mesaId, tipoPagamento, valorPago: valor, formaPagamento, aplicarTaxa: resumo.aplicarTaxa, descontoTipo: tipo || '', descontoPct: resumo.descontoPct || 0, descontoValor: resumo.descontoValor || 0 });
+    logAcao('caixa.pagamento', { mesaId, tipoPagamento, valorPago: valor, formaPagamento, aplicarTaxa: resumo.aplicarTaxa, descontoTipo: tipo || '', descontoPct: resumo.descontoPct || 0, descontoValor: resumo.descontoValor || 0, taxaEntrega: resumo.taxaEntrega || 0 });
     notificar();
 
     return {
@@ -690,6 +695,7 @@ export function criarStore() {
       descontoPct: resumo.descontoPct || 0,
       descontoValor: resumo.descontoValor || 0,
       taxaServico: resumo.taxaServico,
+      taxaEntrega: resumo.taxaEntrega || 0,
       total: resumo.total,
       aplicarTaxa: resumo.aplicarTaxa,
       formaPagamento,
@@ -713,7 +719,7 @@ export function criarStore() {
     assertAcao('gerenciarMesas');
     const ids = Object.keys(state.mesas).map(Number);
     const novoId = ids.length > 0 ? Math.max(...ids) + 1 : 1;
-    state.mesas[novoId] = { id: novoId, itens: [], status: 'livre', tipo, credito: 0, aplicarTaxa: false, token: '' };
+    state.mesas[novoId] = { id: novoId, itens: [], status: 'livre', tipo, credito: 0, aplicarTaxa: false, token: '', clienteId: null, cliente: null, createdAt: 0, taxaEntrega: 0 };
     logAcao('cadastros.adicionar_mesa', { id: novoId, tipo });
     notificar();
   }
@@ -1146,7 +1152,13 @@ export function criarStore() {
     assertLogado();
     assertTab('parametros');
     assertAcao('configurarSistema');
-    state.empresa = { ...(state.empresa || {}), ...(patch || {}) };
+    const next = { ...(state.empresa || {}), ...(patch || {}) };
+    if (Object.prototype.hasOwnProperty.call(next, 'taxaEntregaPadrao')) {
+      const v = Number(next.taxaEntregaPadrao);
+      if (!Number.isFinite(v) || v < 0) throw new Error('Taxa de entrega inválida.');
+      next.taxaEntregaPadrao = Math.max(0, v);
+    }
+    state.empresa = next;
     logAcao('cadastros.atualizar_empresa', {});
     notificar();
   }
@@ -1255,6 +1267,8 @@ export function criarStore() {
     const s = { ...base, ...(novo || {}) };
     let normalizou = false;
     if (!s.empresa) s.empresa = { ...base.empresa };
+    if (!Number.isFinite(Number(s.empresa.taxaEntregaPadrao))) s.empresa.taxaEntregaPadrao = 0;
+    s.empresa.taxaEntregaPadrao = Math.max(0, Number(s.empresa.taxaEntregaPadrao) || 0);
     if (!s.aparencia || typeof s.aparencia !== 'object') s.aparencia = { ...base.aparencia };
     if (!s.perfis) s.perfis = JSON.parse(JSON.stringify(base.perfis));
     if (!Array.isArray(s.usuarios)) s.usuarios = [...base.usuarios];
@@ -1262,6 +1276,8 @@ export function criarStore() {
     if (!Array.isArray(s.auditoria)) s.auditoria = [];
     if (!Array.isArray(s.historico)) s.historico = [];
     if (!Array.isArray(s.estoqueMov)) s.estoqueMov = [];
+    if (!Array.isArray(s.clientes)) s.clientes = [];
+    if (!Number.isFinite(Number(s.proxClienteId))) s.proxClienteId = 1;
     if (!s.mesas || typeof s.mesas !== 'object') s.mesas = { ...base.mesas };
     const mesasOut = {};
     Object.entries(s.mesas || {}).forEach(([k, v]) => {
@@ -1273,7 +1289,11 @@ export function criarStore() {
       const credito = Number.isFinite(Number(v?.credito)) ? Number(v.credito) : 0;
       const aplicarTaxa = !!v?.aplicarTaxa;
       const token = typeof v?.token === 'string' ? v.token : '';
-      mesasOut[id] = { id, itens, status, tipo, credito, aplicarTaxa, token };
+      const clienteId = (v?.clienteId === null || v?.clienteId === undefined) ? null : (Number(v?.clienteId) || null);
+      const cliente = (v?.cliente && typeof v?.cliente === 'object') ? { ...v.cliente } : null;
+      const createdAt = Number.isFinite(Number(v?.createdAt)) ? Number(v.createdAt) : 0;
+      const taxaEntrega = Number.isFinite(Number(v?.taxaEntrega)) ? Math.max(0, Number(v.taxaEntrega)) : 0;
+      mesasOut[id] = { id, itens, status, tipo, credito, aplicarTaxa, token, clienteId, cliente, createdAt, taxaEntrega };
     });
     if (Object.keys(mesasOut).length === 0) {
       s.mesas = { ...base.mesas };

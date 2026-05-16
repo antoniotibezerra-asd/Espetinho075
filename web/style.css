@@ -540,3 +540,36 @@ body.cliente-mode .main {
 .cliente-card {
   padding: 14px;
 }
+
+.cliente-card input {
+  width: 100%;
+  padding: 10px 12px;
+  border: var(--border);
+  border-radius: 12px;
+  font-family: var(--font);
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.cliente-card textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: var(--border);
+  border-radius: 12px;
+  font-family: var(--font);
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.95);
+  resize: vertical;
+}
+
+.cliente-card input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(180, 95, 6, 0.18);
+  border-color: rgba(180, 95, 6, 0.65);
+}
+
+.cliente-card textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(180, 95, 6, 0.18);
+  border-color: rgba(180, 95, 6, 0.65);
+}

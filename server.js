@@ -469,8 +469,9 @@ async function maybeAutoBackupState(sb, state) {
 function sendJson(res, status, obj) {
   if (res.writableEnded || res.headersSent) return;
   const payload = JSON.stringify(obj);
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) });
-  res.end(payload);
+  const buf = Buffer.from(payload, 'utf8');
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': buf.length });
+  res.end(buf);
 }
 
 function readJsonBody(req) {
@@ -558,7 +559,224 @@ function setorPorCategoria(cat) {
   return 'bar';
 }
 
-function applyClientOrderToState(state, { mesaId, itens, origemLabel }) {
+function normalizarTelefoneBR(v) {
+  const raw = String(v || '').trim();
+  if (!raw) return '';
+  let d = raw.replace(/\D+/g, '');
+  if (!d) return '';
+  if (d.startsWith('00')) d = d.slice(2);
+  if (d.startsWith('0')) d = d.replace(/^0+/, '');
+  if (d.startsWith('55')) {
+    if (d.length >= 12 && d.length <= 13) return d;
+    return d;
+  }
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  return d;
+}
+
+function getPublicBaseUrl(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim() || 'http';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  if (!host) return '';
+  return `${proto}://${host}`;
+}
+
+function getWhatsAppConfig() {
+  const token = String(process.env.WHATSAPP_TOKEN || '').trim();
+  const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
+  const verifyToken = String(process.env.WHATSAPP_VERIFY_TOKEN || '').trim();
+  const enabled = parseBool(process.env.WHATSAPP_ENABLED, false);
+  const notify = parseBool(process.env.WHATSAPP_NOTIFY, false);
+  return { enabled, notify, token, phoneNumberId, verifyToken };
+}
+
+async function sendWhatsAppText(toPhone, text) {
+  const cfg = getWhatsAppConfig();
+  if (!cfg.enabled || !cfg.token || !cfg.phoneNumberId) return { ok: false, skipped: true };
+  const to = normalizarTelefoneBR(toPhone);
+  if (!to) return { ok: false, error: 'Telefone inválido.' };
+  const msg = String(text || '').trim();
+  if (!msg) return { ok: false, error: 'Mensagem vazia.' };
+
+  const url = `https://graph.facebook.com/v20.0/${cfg.phoneNumberId}/messages`;
+  const body = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'text',
+    text: { body: msg },
+  };
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return { ok: false, error: j?.error?.message || j?.error?.title || 'Falha WhatsApp.' };
+  return { ok: true, data: j };
+}
+
+function ensureClienteNoEstado(state, { nome, telefone, apelido, entregaTipo, enderecoTexto, referencia, mapsUrl, lat, lng, formaPagamento, trocoPara, observacao }) {
+  const s = state && typeof state === 'object' ? state : null;
+  if (!s) return { clienteId: null, cliente: null };
+  if (!Array.isArray(s.clientes)) s.clientes = [];
+  if (!Number.isFinite(Number(s.proxClienteId))) s.proxClienteId = 1;
+  const tel = normalizarTelefoneBR(telefone);
+  const n = String(nome || '').trim();
+  const ap = String(apelido || '').trim();
+  const ent = (String(entregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : (String(entregaTipo || '').trim() ? 'entrega' : '');
+  const endTxt = String(enderecoTexto || '').trim();
+  const ref = String(referencia || '').trim();
+  const maps = String(mapsUrl || '').trim();
+  const latNum = Number.isFinite(Number(lat)) ? Number(lat) : null;
+  const lngNum = Number.isFinite(Number(lng)) ? Number(lng) : null;
+  const pg = String(formaPagamento || '').trim();
+  const trocoRaw = String(trocoPara || '').trim();
+  const trocoNum = trocoRaw ? Number(String(trocoRaw).replace(',', '.')) : null;
+  const troco = (trocoNum !== null && Number.isFinite(trocoNum) && trocoNum >= 0) ? trocoNum : null;
+  const obs = String(observacao || '').trim();
+
+  if (!tel && !n && !ap) return { clienteId: null, cliente: null };
+
+  let clienteId = null;
+  let outCliente = { nome: n || null, telefone: tel || null, apelido: ap || null, entregaTipo: ent || null, enderecoTexto: endTxt || null, referencia: ref || null, mapsUrl: maps || null, lat: latNum, lng: lngNum, formaPagamento: pg || null, trocoPara: troco, observacao: obs || null };
+  if (tel) {
+    const idx = s.clientes.findIndex(c => normalizarTelefoneBR(c?.telefone) === tel);
+    if (idx !== -1) {
+      const cur = s.clientes[idx];
+      clienteId = Number(cur?.id) || null;
+      const next = { ...cur };
+      if (n) next.nome = n;
+      if (ap) next.apelido = ap;
+      if (tel) next.telefone = tel;
+      if (ent) next.entregaTipo = ent;
+      if (endTxt) next.enderecoTexto = endTxt;
+      if (ref) next.referencia = ref;
+      if (maps) next.mapsUrl = maps;
+      if (latNum !== null) next.lat = latNum;
+      if (lngNum !== null) next.lng = lngNum;
+      if (pg) next.formaPagamento = pg;
+      if (troco !== null) next.trocoPara = troco;
+      if (obs) next.observacao = obs;
+      next.updatedAt = Date.now();
+      s.clientes[idx] = next;
+      outCliente = {
+        nome: next.nome || null,
+        telefone: tel || null,
+        apelido: next.apelido || null,
+        entregaTipo: next.entregaTipo || null,
+        enderecoTexto: next.enderecoTexto || null,
+        referencia: next.referencia || null,
+        mapsUrl: next.mapsUrl || null,
+        lat: Number.isFinite(Number(next.lat)) ? Number(next.lat) : null,
+        lng: Number.isFinite(Number(next.lng)) ? Number(next.lng) : null,
+        formaPagamento: next.formaPagamento || null,
+        trocoPara: (Number.isFinite(Number(next.trocoPara)) && Number(next.trocoPara) >= 0) ? Number(next.trocoPara) : null,
+        observacao: String(next.observacao || '').trim() || null,
+      };
+    } else {
+      const id = Number(s.proxClienteId) || 1;
+      clienteId = id;
+      s.proxClienteId = id + 1;
+      s.clientes.unshift({
+        id,
+        nome: n,
+        apelido: ap,
+        telefone: tel,
+        entregaTipo: ent,
+        enderecoTexto: endTxt,
+        referencia: ref,
+        mapsUrl: maps,
+        lat: latNum,
+        lng: lngNum,
+        formaPagamento: pg,
+        trocoPara: troco,
+        observacao: obs,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        lastMesaId: null,
+      });
+      if (s.clientes.length > 5000) s.clientes.length = 5000;
+    }
+  }
+  return { clienteId, cliente: outCliente };
+}
+
+function calcularStatusMesaParaCliente(state, mesaId) {
+  const st = state && typeof state === 'object' ? state : null;
+  const id = Number(mesaId) || 0;
+  if (!st || !id) return { label: 'Indisponível', counts: { pendente: 0, preparando: 0, entregue: 0 } };
+  const fila = Array.isArray(st.filaProducao) ? st.filaProducao : [];
+  const itens = fila.filter(x => Number(x?.mesaId) === id);
+  const counts = { pendente: 0, preparando: 0, entregue: 0 };
+  itens.forEach(x => {
+    const s = String(x?.status || '').toLowerCase();
+    if (s === 'preparando') counts.preparando += 1;
+    else if (s === 'entregue') counts.entregue += 1;
+    else counts.pendente += 1;
+  });
+  const mesa = st?.mesas?.[id] || null;
+  const vazia = (Array.isArray(mesa?.itens) ? mesa.itens.length : 0) === 0;
+  if (vazia && mesa?.status === 'livre') return { label: 'Finalizado', counts };
+  if (counts.pendente > 0) return { label: 'Recebido', counts };
+  if (counts.preparando > 0) return { label: 'Em preparo', counts };
+  if (counts.entregue > 0) return { label: 'Pronto', counts };
+  return { label: 'Recebido', counts };
+}
+
+async function maybeNotifyWhatsAppOnProductionChange(prevState, nextState, baseUrl) {
+  const cfg = getWhatsAppConfig();
+  if (!cfg.notify) return;
+  const prevFila = Array.isArray(prevState?.filaProducao) ? prevState.filaProducao : [];
+  const nextFila = Array.isArray(nextState?.filaProducao) ? nextState.filaProducao : [];
+  if (!prevFila.length || !nextFila.length) return;
+
+  const prevById = new Map(prevFila.map(x => [String(x?.id || ''), x]).filter(([k]) => !!k));
+  const mudanças = [];
+  nextFila.forEach(n => {
+    const id = String(n?.id || '');
+    if (!id) return;
+    const p = prevById.get(id);
+    if (!p) return;
+    const a = String(p?.status || '').toLowerCase();
+    const b = String(n?.status || '').toLowerCase();
+    if (a !== b) mudanças.push({ mesaId: Number(n?.mesaId) || 0, from: a, to: b });
+  });
+  if (!mudanças.length) return;
+
+  const porMesa = new Map();
+  mudanças.forEach(m => {
+    if (!m.mesaId) return;
+    const cur = porMesa.get(m.mesaId) || { preparando: false, entregue: false };
+    if (m.to === 'preparando') cur.preparando = true;
+    if (m.to === 'entregue') cur.entregue = true;
+    porMesa.set(m.mesaId, cur);
+  });
+
+  const maxSends = 20;
+  let sent = 0;
+  for (const [mesaId, flags] of porMesa.entries()) {
+    if (sent >= maxSends) break;
+    const mesa = nextState?.mesas?.[mesaId] || null;
+    const tel = normalizarTelefoneBR(mesa?.cliente?.telefone || '');
+    const mesaToken = String(mesa?.token || '').trim();
+    if (!tel) continue;
+
+    const link = (baseUrl && mesaToken) ? `${baseUrl}/?cliente=1&mesa=${mesaId}&token=${encodeURIComponent(mesaToken)}` : '';
+    if (flags.entregue) {
+      const msg = `Pedido Nº ${mesaId} está pronto.\n${link ? `Acompanhe: ${link}` : ''}`.trim();
+      await sendWhatsAppText(tel, msg).catch(() => {});
+      sent += 1;
+      continue;
+    }
+    if (flags.preparando) {
+      const msg = `Pedido Nº ${mesaId} está em preparo.\n${link ? `Acompanhe: ${link}` : ''}`.trim();
+      await sendWhatsAppText(tel, msg).catch(() => {});
+      sent += 1;
+    }
+  }
+}
+
+function applyClientOrderToState(state, { mesaId, itens, origemLabel, cliente }) {
   const s = state && typeof state === 'object' ? state : null;
   if (!s) throw new Error('Estado não inicializado.');
   if (!s.mesas || typeof s.mesas !== 'object') throw new Error('Estado inválido (mesas).');
@@ -571,6 +789,8 @@ function applyClientOrderToState(state, { mesaId, itens, origemLabel }) {
   const idMesa = Number(mesaId) || 0;
   const mesa = s.mesas[idMesa];
   if (!mesa) throw new Error('Mesa não encontrada.');
+  if (!Number.isFinite(Number(mesa.createdAt)) || Number(mesa.createdAt) <= 0) mesa.createdAt = Date.now();
+  if (!Number.isFinite(Number(mesa.taxaEntrega)) || Number(mesa.taxaEntrega) < 0) mesa.taxaEntrega = 0;
 
   const itensNorm = (Array.isArray(itens) ? itens : [])
     .map(it => ({ produtoId: Number(it?.produtoId) || 0, qty: Number(it?.qty) || 0 }))
@@ -578,6 +798,36 @@ function applyClientOrderToState(state, { mesaId, itens, origemLabel }) {
     .map(it => ({ ...it, qty: Math.min(50, Math.floor(it.qty)) }))
     .filter(it => it.qty > 0);
   if (!itensNorm.length) throw new Error('Itens inválidos.');
+
+  const clienteInfo = ensureClienteNoEstado(s, {
+    nome: cliente?.nome,
+    telefone: cliente?.telefone,
+    apelido: cliente?.apelido,
+    entregaTipo: cliente?.entregaTipo,
+    enderecoTexto: cliente?.enderecoTexto,
+    referencia: cliente?.referencia,
+    mapsUrl: cliente?.mapsUrl,
+    lat: cliente?.lat,
+    lng: cliente?.lng,
+    formaPagamento: cliente?.formaPagamento,
+    trocoPara: cliente?.trocoPara,
+    observacao: cliente?.observacao,
+  });
+  if (clienteInfo?.cliente) {
+    mesa.clienteId = clienteInfo.clienteId || null;
+    mesa.cliente = { ...clienteInfo.cliente };
+    if (clienteInfo?.clienteId) {
+      const idx = (Array.isArray(s.clientes) ? s.clientes : []).findIndex(c => Number(c?.id) === Number(clienteInfo.clienteId));
+      if (idx !== -1) s.clientes[idx] = { ...s.clientes[idx], lastMesaId: idMesa };
+    }
+  }
+  if (mesa.tipo === 'online') {
+    const ent = String(mesa?.cliente?.entregaTipo || '').trim().toLowerCase();
+    const isEntrega = ent !== 'retirada';
+    const padrao = Number.isFinite(Number(s?.empresa?.taxaEntregaPadrao)) ? Math.max(0, Number(s.empresa.taxaEntregaPadrao)) : 0;
+    if (isEntrega && Number(mesa.taxaEntrega) === 0 && padrao > 0) mesa.taxaEntrega = padrao;
+    if (!isEntrega) mesa.taxaEntrega = 0;
+  }
 
   const prodById = new Map((s.produtos || []).map(p => [Number(p?.id) || 0, p]).filter(([k]) => !!k));
   const erros = [];
@@ -606,7 +856,7 @@ function applyClientOrderToState(state, { mesaId, itens, origemLabel }) {
     userNome: 'Cliente',
     userPapel: 'cliente',
     tipo: 'client.order',
-    meta: { mesaId: idMesa, itens: itensNorm.map(x => ({ ...x })), origem: origemLabel || '' },
+    meta: { mesaId: idMesa, itens: itensNorm.map(x => ({ ...x })), origem: origemLabel || '', cliente: clienteInfo?.cliente || null },
   });
   if (s.auditoria.length > 1000) s.auditoria.length = 1000;
 
@@ -662,7 +912,7 @@ function criarMesaOnlineNoEstado(state) {
   if (!s.mesas || typeof s.mesas !== 'object') s.mesas = {};
   const ids = Object.keys(s.mesas).map(Number).filter(n => Number.isFinite(n) && n > 0);
   const novoId = ids.length ? Math.max(...ids) + 1 : 1;
-  s.mesas[novoId] = { id: novoId, itens: [], status: 'livre', tipo: 'online', credito: 0, aplicarTaxa: false, token: randomToken(12) };
+  s.mesas[novoId] = { id: novoId, itens: [], status: 'livre', tipo: 'online', credito: 0, aplicarTaxa: false, token: randomToken(12), clienteId: null, cliente: null, createdAt: Date.now(), taxaEntrega: 0 };
   return { mesaId: novoId, token: String(s.mesas[novoId].token || '') };
 }
 
@@ -750,13 +1000,15 @@ const server = http.createServer((req, res) => {
           }))
           .filter(p => p.id > 0 && p.nome);
         const categorias = Array.isArray(st.categorias) ? st.categorias.map(x => String(x || '')).filter(Boolean) : [];
+        const formasPagamento = Array.isArray(st.formasPagamento) ? st.formasPagamento.map(x => String(x || '')).filter(Boolean) : [];
         const empresa = st.empresa ? {
           nome: String(st.empresa?.nome || ''),
           telefone: String(st.empresa?.telefone || ''),
           endereco: String(st.empresa?.endereco || ''),
           logoUrl: String(st.empresa?.logoUrl || ''),
+          taxaEntregaPadrao: Number.isFinite(Number(st.empresa?.taxaEntregaPadrao)) ? Math.max(0, Number(st.empresa.taxaEntregaPadrao)) : 0,
         } : null;
-        return sendJson(res, 200, { ok: true, data: { empresa, categorias, produtos } });
+        return sendJson(res, 200, { ok: true, data: { empresa, categorias, formasPagamento, produtos } });
       })
       .catch(err => sendJson(res, 500, { error: err.message || String(err) }));
     return;
@@ -769,6 +1021,19 @@ const server = http.createServer((req, res) => {
         let mesaId = Number(body?.mesaId) || 0;
         const token = String(body?.token || '').trim();
         const itens = Array.isArray(body?.itens) ? body.itens : [];
+        const clienteNome = String(body?.cliente?.nome || '').trim();
+        const clienteTelefone = String(body?.cliente?.telefone || '').trim();
+        const clienteApelido = String(body?.cliente?.apelido || body?.cliente?.comoChamar || '').trim();
+        const entregaTipo = String(body?.cliente?.entregaTipo || '').trim();
+        const enderecoTexto = String(body?.cliente?.enderecoTexto || body?.cliente?.endereco || '').trim();
+        const referencia = String(body?.cliente?.referencia || '').trim();
+        const mapsUrl = String(body?.cliente?.mapsUrl || '').trim();
+        const lat = body?.cliente?.lat;
+        const lng = body?.cliente?.lng;
+        const formaPagamento = String(body?.cliente?.formaPagamento || '').trim();
+        const trocoPara = body?.cliente?.trocoPara;
+        const observacao = String(body?.cliente?.observacao || '').trim();
+        const cliente = { nome: clienteNome, telefone: clienteTelefone, apelido: clienteApelido, entregaTipo, enderecoTexto, referencia, mapsUrl, lat, lng, formaPagamento, trocoPara, observacao };
 
         const tries = 3;
         for (let attempt = 0; attempt < tries; attempt++) {
@@ -783,6 +1048,14 @@ const server = http.createServer((req, res) => {
             if (!mesaToken) return sendJson(res, 400, { error: 'Mesa sem token. Gere o QR Code novamente.' });
             if (!token || token !== mesaToken) return sendJson(res, 401, { error: 'Token inválido.' });
           } else {
+            const telNorm = normalizarTelefoneBR(clienteTelefone);
+            if (!String(clienteNome || '').trim()) return sendJson(res, 400, { error: 'Informe seu nome.' });
+            if (!telNorm) return sendJson(res, 400, { error: 'Informe seu WhatsApp/telefone.' });
+            const ent = (String(entregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
+            const hasLatLng = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
+            const hasEndereco = !!String(enderecoTexto || '').trim() || !!String(mapsUrl || '').trim() || hasLatLng;
+            if (ent === 'entrega' && !hasEndereco) return sendJson(res, 400, { error: 'Informe o endereço de entrega.' });
+            if (!String(formaPagamento || '').trim()) return sendJson(res, 400, { error: 'Escolha a forma de pagamento.' });
             try {
               outOnline = criarMesaOnlineNoEstado(st);
               mesaId = outOnline.mesaId;
@@ -793,7 +1066,7 @@ const server = http.createServer((req, res) => {
 
           let nextState;
           try {
-            nextState = applyClientOrderToState(st, { mesaId, itens, origemLabel: mesaId > 0 && !outOnline ? 'Mesa' : 'Online' });
+            nextState = applyClientOrderToState(st, { mesaId, itens, origemLabel: mesaId > 0 && !outOnline ? 'Mesa' : 'Online', cliente });
           } catch (e) {
             return sendJson(res, 400, { error: e.message || String(e) });
           }
@@ -805,7 +1078,39 @@ const server = http.createServer((req, res) => {
             _sseLast = { rev: Number(serverInfo?.rev) || 0, updatedAt: Number(serverInfo?.updatedAt) || 0 };
             _broadcastServerInfo(_sseLast);
             maybeAutoBackupState(ctx?.sb || null, nextState);
-            return sendJson(res, 200, { ok: true, server: serverInfo, mesaId, token: outOnline?.token || null });
+            const mesaToken = outOnline?.token || token || String(nextState?.mesas?.[mesaId]?.token || '').trim();
+            const status = calcularStatusMesaParaCliente(nextState, mesaId);
+            const baseUrl = getPublicBaseUrl(req);
+            const trackUrl = (baseUrl && mesaToken) ? `${baseUrl}/?cliente=1&mesa=${mesaId}&token=${encodeURIComponent(mesaToken)}` : '';
+            const cfg = getWhatsAppConfig();
+            const telTo = normalizarTelefoneBR(nextState?.mesas?.[mesaId]?.cliente?.telefone || clienteTelefone);
+            if (cfg.notify && telTo) {
+              const mesaObj = nextState?.mesas?.[mesaId] || {};
+              const c = (mesaObj?.cliente && typeof mesaObj.cliente === 'object') ? mesaObj.cliente : {};
+              const nomeChamar = String(c?.apelido || c?.nome || 'Cliente').trim();
+              const ent = String(c?.entregaTipo || '').trim().toLowerCase() || (mesaObj?.tipo === 'online' ? 'entrega' : '');
+              const endTxt = String(c?.enderecoTexto || '').trim();
+              const ref = String(c?.referencia || '').trim();
+              const maps = String(c?.mapsUrl || '').trim();
+              const pg = String(c?.formaPagamento || '').trim();
+              const troco = (Number.isFinite(Number(c?.trocoPara)) && Number(c?.trocoPara) >= 0) ? Number(c.trocoPara) : null;
+              const obs = String(c?.observacao || '').trim();
+              const parts = [
+                `Olá, ${nomeChamar}!`,
+                `Pedido recebido! Nº ${mesaId}.`,
+                `Status: ${status.label}.`,
+                (mesaObj?.tipo === 'online' && ent ? `Tipo: ${ent === 'retirada' ? 'Retirada' : 'Entrega'}.` : ''),
+                (mesaObj?.tipo === 'online' && ent !== 'retirada' && (endTxt || maps)) ? `Endereço: ${endTxt || maps}` : '',
+                (mesaObj?.tipo === 'online' && ent !== 'retirada' && ref) ? `Referência: ${ref}` : '',
+                (mesaObj?.tipo === 'online' && pg) ? `Pagamento: ${pg}.` : '',
+                (mesaObj?.tipo === 'online' && troco !== null && pg.toLowerCase().includes('dinheiro')) ? `Troco para: R$ ${troco.toFixed(2).replace('.', ',')}.` : '',
+                (mesaObj?.tipo === 'online' && obs) ? `Obs: ${obs}` : '',
+                trackUrl ? `Acompanhe: ${trackUrl}` : '',
+              ].filter(Boolean);
+              const msg = parts.join('\n').trim();
+              sendWhatsAppText(telTo, msg).catch(() => {});
+            }
+            return sendJson(res, 200, { ok: true, server: serverInfo, mesaId, token: mesaToken || null, status, trackUrl: trackUrl || null });
           } catch (err) {
             return sendJson(res, 500, { error: err.message || String(err) });
           }
@@ -814,6 +1119,159 @@ const server = http.createServer((req, res) => {
       })
       .catch(err => sendJson(res, 400, { error: err.message || String(err) }));
     return;
+  }
+
+  if (url === '/api/client/order-status') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Método não permitido.' });
+    const mesaId = Number(parsedUrl.searchParams.get('mesaId')) || 0;
+    const token = String(parsedUrl.searchParams.get('token') || '').trim();
+    if (!mesaId || !token) return sendJson(res, 400, { error: 'Parâmetros inválidos.' });
+    loadStateAny()
+      .then(ctx => {
+        const st = ctx?.state || null;
+        if (!st) return sendJson(res, 400, { error: 'Sistema ainda não foi inicializado.' });
+        const mesa = st?.mesas?.[mesaId] || null;
+        if (!mesa) return sendJson(res, 404, { error: 'Pedido não encontrado.' });
+        const mesaToken = String(mesa?.token || '').trim();
+        if (!mesaToken) return sendJson(res, 400, { error: 'Pedido sem token.' });
+        if (token !== mesaToken) return sendJson(res, 401, { error: 'Token inválido.' });
+
+        const status = calcularStatusMesaParaCliente(st, mesaId);
+        const itens = (Array.isArray(st.filaProducao) ? st.filaProducao : [])
+          .filter(x => Number(x?.mesaId) === mesaId)
+          .map(x => ({
+            id: x?.id || null,
+            nome: String(x?.nome || ''),
+            qty: Number(x?.qty) || 0,
+            setor: String(x?.setor || ''),
+            status: String(x?.status || 'pendente'),
+            hora: String(x?.hora || ''),
+          }))
+          .filter(x => x.qty > 0 && x.nome);
+
+        return sendJson(res, 200, {
+          ok: true,
+          mesa: {
+            id: mesaId,
+            tipo: String(mesa?.tipo || ''),
+            createdAt: Number(mesa?.createdAt) || 0,
+            taxaEntrega: Number.isFinite(Number(mesa?.taxaEntrega)) ? Math.max(0, Number(mesa.taxaEntrega)) : 0,
+            cliente: (mesa?.cliente && typeof mesa.cliente === 'object') ? { ...mesa.cliente } : null,
+          },
+          status,
+          itens,
+        });
+      })
+      .catch(err => sendJson(res, 500, { error: err.message || String(err) }));
+    return;
+  }
+
+  if (url === '/api/whatsapp/webhook') {
+    const cfg = getWhatsAppConfig();
+    if (req.method === 'GET') {
+      const mode = String(parsedUrl.searchParams.get('hub.mode') || '');
+      const token = String(parsedUrl.searchParams.get('hub.verify_token') || '');
+      const challenge = String(parsedUrl.searchParams.get('hub.challenge') || '');
+      if (mode === 'subscribe' && cfg.verifyToken && token === cfg.verifyToken) {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end(challenge);
+        return;
+      }
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+
+    if (req.method === 'POST') {
+      readJsonBody(req)
+        .then(body => {
+          sendJson(res, 200, { ok: true });
+          if (!cfg.enabled) return;
+
+          const entries = Array.isArray(body?.entry) ? body.entry : [];
+          const baseUrl = getPublicBaseUrl(req);
+          const menuUrl = baseUrl ? `${baseUrl}/?cliente=1` : '';
+
+          const tasks = [];
+          entries.forEach(en => {
+            const changes = Array.isArray(en?.changes) ? en.changes : [];
+            changes.forEach(ch => {
+              const v = ch?.value || {};
+              const msgs = Array.isArray(v?.messages) ? v.messages : [];
+              msgs.forEach(m => {
+                const from = normalizarTelefoneBR(m?.from || '');
+                const txt = String(m?.text?.body || '').trim();
+                if (!from || !txt) return;
+                tasks.push({ from, txt });
+              });
+            });
+          });
+
+          tasks.slice(0, 10).forEach(async ({ from, txt }) => {
+            const t = txt.toLowerCase();
+            if (t.includes('menu') || t === '1') {
+              const resp = menuUrl ? `Cardápio: ${menuUrl}` : 'Cardápio indisponível no momento.';
+              await sendWhatsAppText(from, resp).catch(() => {});
+              return;
+            }
+
+            if (t.includes('status') || t.includes('pedido') || t === '2') {
+              try {
+                const ctx = await loadStateAny();
+                const st = ctx?.state || null;
+                if (!st) {
+                  await sendWhatsAppText(from, 'Sistema ainda não foi inicializado.').catch(() => {});
+                  return;
+                }
+                const mesas = Object.values(st?.mesas || {});
+                const cand = mesas
+                  .filter(m => normalizarTelefoneBR(m?.cliente?.telefone || '') === from)
+                  .filter(m => m?.status === 'ocupada')
+                  .slice()
+                  .sort((a, b) => (Number(b?.id) || 0) - (Number(a?.id) || 0));
+                const mesa = cand[0] || null;
+                if (!mesa) {
+                  await sendWhatsAppText(from, 'Não encontrei pedido em aberto para este número.').catch(() => {});
+                  return;
+                }
+                const status = calcularStatusMesaParaCliente(st, mesa.id);
+                const link = baseUrl ? `${baseUrl}/?cliente=1&mesa=${mesa.id}&token=${encodeURIComponent(String(mesa?.token || '').trim())}` : '';
+                const ent = String(mesa?.cliente?.entregaTipo || '').trim().toLowerCase();
+                const endTxt = String(mesa?.cliente?.enderecoTexto || '').trim();
+                const ref = String(mesa?.cliente?.referencia || '').trim();
+                const pg = String(mesa?.cliente?.formaPagamento || '').trim();
+                const parts = [
+                  `Pedido Nº ${mesa.id}`,
+                  `Status: ${status.label}`,
+                  (mesa?.tipo === 'online' && ent) ? `Tipo: ${ent === 'retirada' ? 'Retirada' : 'Entrega'}` : '',
+                  (mesa?.tipo === 'online' && ent !== 'retirada' && endTxt) ? `Endereço: ${endTxt}` : '',
+                  (mesa?.tipo === 'online' && ent !== 'retirada' && ref) ? `Referência: ${ref}` : '',
+                  (mesa?.tipo === 'online' && pg) ? `Pagamento: ${pg}` : '',
+                  link ? `Acompanhe: ${link}` : '',
+                ].filter(Boolean);
+                const resp = parts.join('\n').trim();
+                await sendWhatsAppText(from, resp).catch(() => {});
+                return;
+              } catch {
+                await sendWhatsAppText(from, 'Falha ao consultar status.').catch(() => {});
+                return;
+              }
+            }
+
+            const help = [
+              'Olá! Como posso ajudar?',
+              '1) Menu',
+              '2) Status do pedido',
+              'Responda com 1 ou 2.',
+            ].join('\n');
+            await sendWhatsAppText(from, help).catch(() => {});
+          });
+        })
+        .catch(err => sendJson(res, 400, { error: err.message || String(err) }));
+      return;
+    }
+
+    return sendJson(res, 405, { error: 'Método não permitido.' });
   }
 
   if (url.startsWith('/api/state')) {
@@ -841,10 +1299,18 @@ const server = http.createServer((req, res) => {
 
     if (req.method === 'POST') {
       readJsonBody(req)
-        .then(body => {
+        .then(async body => {
           const state = body?.state ?? null;
           const force = !!body?.force;
           const ifRev = body?.ifRev;
+          const baseUrl = getPublicBaseUrl(req);
+          let prevState = null;
+          try {
+            const prevCtx = await loadStateAny();
+            prevState = prevCtx?.state || null;
+          } catch {
+            prevState = null;
+          }
 
           const sb = getSupabaseClientOrNull();
           if (sb) {
@@ -854,6 +1320,7 @@ const server = http.createServer((req, res) => {
                 _sseLast = { rev: Number(out?.server?.rev) || 0, updatedAt: Number(out?.server?.updatedAt) || 0 };
                 _broadcastServerInfo(_sseLast);
                 maybeAutoBackupState(sb, state);
+                maybeNotifyWhatsAppOnProductionChange(prevState, state, baseUrl).catch(() => {});
                 return sendJson(res, 200, { ok: true, server: out.server });
               })
               .catch(err => {
@@ -869,6 +1336,7 @@ const server = http.createServer((req, res) => {
                 _sseLast = { rev: Number(out?.server?.rev) || 0, updatedAt: Number(out?.server?.updatedAt) || 0 };
                 _broadcastServerInfo(_sseLast);
                 maybeAutoBackupState(null, state);
+                maybeNotifyWhatsAppOnProductionChange(prevState, state, baseUrl).catch(() => {});
                 return sendJson(res, 200, { ok: true, server: out.server });
               });
             return;
@@ -879,6 +1347,7 @@ const server = http.createServer((req, res) => {
           _sseLast = { rev: Number(out?.server?.rev) || 0, updatedAt: Number(out?.server?.updatedAt) || 0 };
           _broadcastServerInfo(_sseLast);
           maybeAutoBackupState(null, state);
+          maybeNotifyWhatsAppOnProductionChange(prevState, state, baseUrl).catch(() => {});
           sendJson(res, 200, { ok: true, server: out.server });
         })
         .catch(err => sendJson(res, 400, { error: err.message }));
