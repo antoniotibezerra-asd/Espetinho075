@@ -590,6 +590,52 @@ function getWhatsAppConfig() {
   return { enabled, notify, token, phoneNumberId, verifyToken };
 }
 
+const _clientSessions = new Map();
+
+function sha256Hex(s) {
+  const str = String(s ?? '');
+  try {
+    return crypto.createHash('sha256').update(str, 'utf8').digest('hex');
+  } catch {
+    return '';
+  }
+}
+
+function _getBearerToken(req) {
+  const h = String(req?.headers?.authorization || '').trim();
+  const m = h.match(/^bearer\s+(.+)$/i);
+  return m ? String(m[1] || '').trim() : '';
+}
+
+function _getClientSession(token) {
+  const t = String(token || '').trim();
+  if (!t) return null;
+  const s = _clientSessions.get(t) || null;
+  if (!s) return null;
+  const ttl = 30 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  if (Number(s?.createdAt) && (now - Number(s.createdAt)) > ttl) {
+    _clientSessions.delete(t);
+    return null;
+  }
+  s.lastAt = now;
+  _clientSessions.set(t, s);
+  return s;
+}
+
+function _requireClientAuth(req, state) {
+  const st = state && typeof state === 'object' ? state : null;
+  if (!st) return { ok: false, error: 'Sistema ainda não foi inicializado.' };
+  if (!Array.isArray(st.clientes)) st.clientes = [];
+  const token = _getBearerToken(req);
+  const sess = _getClientSession(token);
+  const clienteId = Number(sess?.clienteId) || 0;
+  if (!clienteId) return { ok: false, error: 'Faça login.' };
+  const cliente = (st.clientes || []).find(c => Number(c?.id) === clienteId) || null;
+  if (!cliente) return { ok: false, error: 'Conta não encontrada.' };
+  return { ok: true, token, clienteId, cliente };
+}
+
 async function sendWhatsAppText(toPhone, text) {
   const cfg = getWhatsAppConfig();
   if (!cfg.enabled || !cfg.token || !cfg.phoneNumberId) return { ok: false, skipped: true };
@@ -834,6 +880,7 @@ function applyClientOrderToState(state, { mesaId, itens, origemLabel, cliente })
   for (const it of itensNorm) {
     const p = prodById.get(it.produtoId);
     if (!p) { erros.push(`Produto ${it.produtoId} não encontrado.`); continue; }
+    if (mesa.tipo !== 'online' && p.somenteOnline) erros.push(`"${p.nome}" disponível apenas no pedido online.`);
     if (!s.permitirVendaSemEstoque && Number(p.estoque) < it.qty) erros.push(`"${p.nome}" sem estoque suficiente.`);
   }
   if (erros.length) throw new Error(erros.join(' '));
@@ -860,12 +907,21 @@ function applyClientOrderToState(state, { mesaId, itens, origemLabel, cliente })
   });
   if (s.auditoria.length > 1000) s.auditoria.length = 1000;
 
+  const pctOnline = Number.isFinite(Number(s?.empresa?.precoOnlinePct)) ? Number(s.empresa.precoOnlinePct) : 0;
+  const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
   for (const it of itensNorm) {
     const p = prodById.get(it.produtoId);
     if (!p) continue;
+    const precoVenda = (mesa.tipo === 'online')
+      ? round2((Number(p.preco) || 0) * (1 + (pctOnline / 100)))
+      : (Number(p.preco) || 0);
     const itemMesa = (mesa.itens || []).find(x => Number(x?.id) === Number(p.id));
-    if (itemMesa) itemMesa.qty = (Number(itemMesa.qty) || 0) + it.qty;
-    else mesa.itens.push({ id: p.id, nome: p.nome, preco: p.preco, qty: it.qty });
+    if (itemMesa) {
+      itemMesa.preco = precoVenda;
+      itemMesa.qty = (Number(itemMesa.qty) || 0) + it.qty;
+    } else {
+      mesa.itens.push({ id: p.id, nome: p.nome, preco: precoVenda, qty: it.qty });
+    }
     p.estoque = Number(p.estoque) - it.qty;
 
     const movTs = ts;
@@ -900,6 +956,26 @@ function applyClientOrderToState(state, { mesaId, itens, origemLabel, cliente })
       hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       origem: origemLabel || 'Online',
     });
+  }
+
+  if (!Array.isArray(s.pedidosCliente)) s.pedidosCliente = [];
+  if (!Number.isFinite(Number(s.proxPedidoClienteId))) s.proxPedidoClienteId = 1;
+  if (mesa.tipo === 'online' && Number(mesa?.clienteId) > 0) {
+    const clienteId = Number(mesa.clienteId) || 0;
+    const subtotalPedido = (Array.isArray(mesa.itens) ? mesa.itens : []).reduce((sum, x) => sum + (Number(x?.preco) || 0) * (Number(x?.qty) || 0), 0);
+    const taxaEntrega = Number.isFinite(Number(mesa?.taxaEntrega)) ? Math.max(0, Number(mesa.taxaEntrega)) : 0;
+    const totalPedido = subtotalPedido + taxaEntrega;
+    const itensSnap = (Array.isArray(mesa.itens) ? mesa.itens : []).map(x => ({ id: Number(x?.id) || 0, nome: String(x?.nome || ''), preco: Number(x?.preco) || 0, qty: Number(x?.qty) || 0 })).filter(x => x.id && x.qty > 0);
+    const idx = s.pedidosCliente.findIndex(p => Number(p?.mesaId) === idMesa && Number(p?.clienteId) === clienteId);
+    if (idx !== -1) {
+      const cur = s.pedidosCliente[idx] || {};
+      s.pedidosCliente[idx] = { ...cur, ts: cur.ts || ts, itens: itensSnap, subtotal: subtotalPedido, taxaEntrega, total: totalPedido };
+    } else {
+      const pid = Number(s.proxPedidoClienteId) || 1;
+      s.proxPedidoClienteId = pid + 1;
+      s.pedidosCliente.unshift({ id: pid, clienteId, mesaId: idMesa, ts, itens: itensSnap, subtotal: subtotalPedido, taxaEntrega, total: totalPedido });
+      if (s.pedidosCliente.length > 5000) s.pedidosCliente.length = 5000;
+    }
   }
 
   if (s.estoqueMov.length > 5000) s.estoqueMov.length = 5000;
@@ -995,6 +1071,8 @@ const server = http.createServer((req, res) => {
             cat: String(p?.cat || ''),
             subcat: String(p?.subcat || ''),
             preco: Number(p?.preco) || 0,
+            tipo: (String(p?.tipo || '').toLowerCase() === 'combo') ? 'combo' : 'produto',
+            somenteOnline: !!p?.somenteOnline,
             imagem: String(p?.imagem || ''),
             disponivel: permitir ? true : (Number(p?.estoque) > 0),
           }))
@@ -1007,8 +1085,143 @@ const server = http.createServer((req, res) => {
           endereco: String(st.empresa?.endereco || ''),
           logoUrl: String(st.empresa?.logoUrl || ''),
           taxaEntregaPadrao: Number.isFinite(Number(st.empresa?.taxaEntregaPadrao)) ? Math.max(0, Number(st.empresa.taxaEntregaPadrao)) : 0,
+          precoOnlinePct: Number.isFinite(Number(st.empresa?.precoOnlinePct)) ? Number(st.empresa.precoOnlinePct) : 0,
         } : null;
         return sendJson(res, 200, { ok: true, data: { empresa, categorias, formasPagamento, produtos } });
+      })
+      .catch(err => sendJson(res, 500, { error: err.message || String(err) }));
+    return;
+  }
+
+  if (url === '/api/client/register') {
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Método não permitido.' });
+    readJsonBody(req)
+      .then(async body => {
+        const nome = String(body?.nome || '').trim();
+        const apelido = String(body?.apelido || '').trim();
+        const telefoneRaw = String(body?.telefone || '').trim();
+        const senha = String(body?.senha || '').trim();
+        const telefone = normalizarTelefoneBR(telefoneRaw);
+        if (!nome) return sendJson(res, 400, { error: 'Informe seu nome.' });
+        if (!telefone) return sendJson(res, 400, { error: 'Informe seu WhatsApp/telefone.' });
+        if (senha.length < 4) return sendJson(res, 400, { error: 'Senha muito curta.' });
+
+        const tries = 3;
+        for (let attempt = 0; attempt < tries; attempt++) {
+          const ctx = await loadStateAny();
+          const st = ctx?.state || null;
+          if (!st) return sendJson(res, 400, { error: 'Sistema ainda não foi inicializado.' });
+          if (!Array.isArray(st.clientes)) st.clientes = [];
+          if (!Number.isFinite(Number(st.proxClienteId))) st.proxClienteId = 1;
+
+          const idx = st.clientes.findIndex(c => normalizarTelefoneBR(c?.telefone) === telefone);
+          let clienteId = 0;
+          if (idx !== -1) {
+            const cur = st.clientes[idx] || {};
+            if (String(cur?.senhaHash || '').trim()) return sendJson(res, 400, { error: 'Conta já cadastrada. Faça login.' });
+            clienteId = Number(cur?.id) || 0;
+            const salt = randomToken(8);
+            const hash = sha256Hex(`${salt}:${senha}`);
+            st.clientes[idx] = { ...cur, nome, apelido: apelido || cur?.apelido || '', telefone, senhaSalt: salt, senhaHash: hash, updatedAt: Date.now() };
+          } else {
+            const id = Number(st.proxClienteId) || 1;
+            st.proxClienteId = id + 1;
+            clienteId = id;
+            const salt = randomToken(8);
+            const hash = sha256Hex(`${salt}:${senha}`);
+            st.clientes.unshift({ id, nome, apelido, telefone, senhaSalt: salt, senhaHash: hash, createdAt: Date.now(), updatedAt: Date.now(), lastMesaId: null });
+            if (st.clientes.length > 5000) st.clientes.length = 5000;
+          }
+
+          const ts = Date.now();
+          const prevRev = Number.isFinite(Number(st.sync?.rev)) ? Number(st.sync.rev) : 0;
+          st.sync = { ...(st.sync || {}), rev: prevRev + 1, updatedAt: ts, updatedBy: { id: null, nome: 'Cliente', papel: 'cliente' } };
+
+          const out = await saveStateAny(ctx, { state: st, ifRev: ctx?.server?.rev, force: false });
+          if (out?.conflict) continue;
+          const token = randomToken(18);
+          _clientSessions.set(token, { clienteId, createdAt: Date.now(), lastAt: Date.now() });
+          return sendJson(res, 200, { ok: true, token, cliente: { id: clienteId, nome, apelido: apelido || null, telefone } });
+        }
+        return sendJson(res, 409, { error: 'CONFLICT' });
+      })
+      .catch(err => sendJson(res, 400, { error: err.message || String(err) }));
+    return;
+  }
+
+  if (url === '/api/client/login') {
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Método não permitido.' });
+    readJsonBody(req)
+      .then(async body => {
+        const telefone = normalizarTelefoneBR(body?.telefone);
+        const senha = String(body?.senha || '').trim();
+        if (!telefone) return sendJson(res, 400, { error: 'Informe seu WhatsApp/telefone.' });
+        if (!senha) return sendJson(res, 400, { error: 'Informe sua senha.' });
+        const ctx = await loadStateAny();
+        const st = ctx?.state || null;
+        if (!st) return sendJson(res, 400, { error: 'Sistema ainda não foi inicializado.' });
+        const cliente = (Array.isArray(st.clientes) ? st.clientes : []).find(c => normalizarTelefoneBR(c?.telefone) === telefone) || null;
+        if (!cliente) return sendJson(res, 401, { error: 'Telefone ou senha inválidos.' });
+        const salt = String(cliente?.senhaSalt || '');
+        const hash = String(cliente?.senhaHash || '');
+        if (!salt || !hash) return sendJson(res, 401, { error: 'Conta sem senha. Faça o cadastro.' });
+        const ok = sha256Hex(`${salt}:${senha}`) === hash;
+        if (!ok) return sendJson(res, 401, { error: 'Telefone ou senha inválidos.' });
+        const token = randomToken(18);
+        _clientSessions.set(token, { clienteId: Number(cliente?.id) || 0, createdAt: Date.now(), lastAt: Date.now() });
+        return sendJson(res, 200, { ok: true, token, cliente: { id: Number(cliente?.id) || 0, nome: String(cliente?.nome || ''), apelido: String(cliente?.apelido || '') || null, telefone } });
+      })
+      .catch(err => sendJson(res, 400, { error: err.message || String(err) }));
+    return;
+  }
+
+  if (url === '/api/client/me') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Método não permitido.' });
+    loadStateAny()
+      .then(ctx => {
+        const st = ctx?.state || null;
+        const auth = _requireClientAuth(req, st);
+        if (!auth.ok) return sendJson(res, 401, { error: auth.error });
+        const c = auth.cliente || {};
+        return sendJson(res, 200, { ok: true, cliente: { id: Number(c?.id) || 0, nome: String(c?.nome || ''), apelido: String(c?.apelido || '') || null, telefone: normalizarTelefoneBR(c?.telefone) } });
+      })
+      .catch(err => sendJson(res, 500, { error: err.message || String(err) }));
+    return;
+  }
+
+  if (url === '/api/client/orders') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Método não permitido.' });
+    loadStateAny()
+      .then(ctx => {
+        const st = ctx?.state || null;
+        const auth = _requireClientAuth(req, st);
+        if (!auth.ok) return sendJson(res, 401, { error: auth.error });
+        const clienteId = Number(auth.clienteId) || 0;
+        const baseUrl = getPublicBaseUrl(req);
+        const pedidos = (Array.isArray(st?.pedidosCliente) ? st.pedidosCliente : [])
+          .filter(p => Number(p?.clienteId) === clienteId)
+          .slice()
+          .sort((a, b) => (Number(b?.ts) || 0) - (Number(a?.ts) || 0))
+          .slice(0, 50)
+          .map(p => {
+            const mesaId = Number(p?.mesaId) || 0;
+            const mesa = st?.mesas?.[mesaId] || null;
+            const status = mesa ? calcularStatusMesaParaCliente(st, mesaId) : { label: 'Finalizado', counts: { pendente: 0, preparando: 0, entregue: 0 } };
+            const mesaToken = String(mesa?.token || '').trim();
+            const trackUrl = (baseUrl && mesaId && mesaToken) ? `${baseUrl}/?cliente=1&mesa=${mesaId}&token=${encodeURIComponent(mesaToken)}` : '';
+            return {
+              id: Number(p?.id) || null,
+              mesaId,
+              ts: Number(p?.ts) || 0,
+              subtotal: Number(p?.subtotal) || 0,
+              taxaEntrega: Number(p?.taxaEntrega) || 0,
+              total: Number(p?.total) || 0,
+              itens: Array.isArray(p?.itens) ? p.itens : [],
+              status,
+              trackUrl: trackUrl || null,
+            };
+          });
+        return sendJson(res, 200, { ok: true, pedidos });
       })
       .catch(err => sendJson(res, 500, { error: err.message || String(err) }));
     return;
@@ -1048,20 +1261,38 @@ const server = http.createServer((req, res) => {
             if (!mesaToken) return sendJson(res, 400, { error: 'Mesa sem token. Gere o QR Code novamente.' });
             if (!token || token !== mesaToken) return sendJson(res, 401, { error: 'Token inválido.' });
           } else {
-            const telNorm = normalizarTelefoneBR(clienteTelefone);
-            if (!String(clienteNome || '').trim()) return sendJson(res, 400, { error: 'Informe seu nome.' });
+            const auth = _requireClientAuth(req, st);
+            if (!auth.ok) return sendJson(res, 401, { error: auth.error });
+            const c = auth.cliente || {};
+            const mergedCliente = {
+              nome: String(c?.nome || '') || clienteNome,
+              telefone: String(c?.telefone || '') || clienteTelefone,
+              apelido: clienteApelido || String(c?.apelido || ''),
+              entregaTipo,
+              enderecoTexto,
+              referencia,
+              mapsUrl,
+              lat,
+              lng,
+              formaPagamento,
+              trocoPara,
+              observacao,
+            };
+            const telNorm = normalizarTelefoneBR(mergedCliente.telefone);
+            if (!String(mergedCliente.nome || '').trim()) return sendJson(res, 400, { error: 'Informe seu nome.' });
             if (!telNorm) return sendJson(res, 400, { error: 'Informe seu WhatsApp/telefone.' });
-            const ent = (String(entregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
-            const hasLatLng = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
-            const hasEndereco = !!String(enderecoTexto || '').trim() || !!String(mapsUrl || '').trim() || hasLatLng;
+            const ent = (String(mergedCliente.entregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
+            const hasLatLng = Number.isFinite(Number(mergedCliente.lat)) && Number.isFinite(Number(mergedCliente.lng));
+            const hasEndereco = !!String(mergedCliente.enderecoTexto || '').trim() || !!String(mergedCliente.mapsUrl || '').trim() || hasLatLng;
             if (ent === 'entrega' && !hasEndereco) return sendJson(res, 400, { error: 'Informe o endereço de entrega.' });
-            if (!String(formaPagamento || '').trim()) return sendJson(res, 400, { error: 'Escolha a forma de pagamento.' });
+            if (!String(mergedCliente.formaPagamento || '').trim()) return sendJson(res, 400, { error: 'Escolha a forma de pagamento.' });
             try {
               outOnline = criarMesaOnlineNoEstado(st);
               mesaId = outOnline.mesaId;
             } catch (e) {
               return sendJson(res, 400, { error: e.message || String(e) });
             }
+            Object.assign(cliente, mergedCliente);
           }
 
           let nextState;

@@ -59,7 +59,7 @@ export default function OrdersScreen({ state, store }) {
     descontoPct: Number(String(descontoPct || '').replace(',', '.')),
     descontoValor: Number(String(descontoValor || '').replace(',', '.')),
   }) : { subtotal: 0, descontoValor: 0, descontoPct: 0, taxaServico: 0, total: 0, credito: 0, saldo: 0, aplicarTaxa: false };
-  const disponiveis = store.getProdutosDisponiveis();
+  const disponiveis = store.getProdutosDisponiveis(mesa?.tipo || '');
   
   const categorias = useMemo(() => ['Todos', ...new Set(state.produtos.map(p => p.cat))], [state.produtos]);
   const subcats = useMemo(() => {

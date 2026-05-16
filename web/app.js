@@ -387,6 +387,64 @@ async function _autoExportCadastrosIfNeeded() {
 // - Em caso de conflito, pausa o auto-save e direciona o usuário para resolver via Parâmetros → Sincronização.
 let _saveTimer = null;
 let _saveFailShown = false;
+let _autoResolvingConflict = false;
+
+async function _autoResolverConflito() {
+  if (_autoResolvingConflict) return;
+  _autoResolvingConflict = true;
+  try {
+    const backupState = store.exportarEstado();
+    const ts = Date.now();
+    const key = `conflictBackup:${ts}`;
+    try {
+      localStorage.setItem(key, JSON.stringify({ ts, server: { ..._serverInfo }, state: backupState }));
+      localStorage.setItem('conflictBackup:last', key);
+      try {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && String(k).startsWith('conflictBackup:')) keys.push(String(k));
+        }
+        keys.sort();
+        const keep = 3;
+        if (keys.length > keep) {
+          keys.slice(0, keys.length - keep).forEach(k => {
+            try { localStorage.removeItem(k); } catch {}
+          });
+        }
+      } catch {}
+    } catch {}
+
+    carregadoDoServidor = false;
+    _pendingSave = true;
+    _lastSaveError = 'Conflito: atualizando do servidor...';
+    try { render(store.getState()); } catch {}
+
+    const data = await _fetchRemoteState();
+    const remoteState = data?.state || null;
+    if (remoteState) store.importarEstado(remoteState);
+
+    carregadoDoServidor = true;
+    _conflitoNotificado = false;
+    _pendingSave = false;
+    _saveFailShown = false;
+    _lastSavedAt = Date.now();
+    _lastSaveError = 'Conflito resolvido automaticamente (servidor)';
+
+    const token = localStorage.getItem('sessaoToken') || '';
+    const ok = token ? store.restaurarSessao(token) : false;
+    if (!ok && !_isClienteMode) _abrirModalUsuario(true);
+    render(store.getState());
+  } catch {
+    carregadoDoServidor = false;
+    _pendingSave = true;
+    _lastSaveError = 'Conflito: falha ao baixar';
+    try { render(store.getState()); } catch {}
+  } finally {
+    _autoResolvingConflict = false;
+  }
+}
+
 store.subscribe(() => {
   if (!carregadoDoServidor) return;
   if (_saveTimer) clearTimeout(_saveTimer);
@@ -404,12 +462,7 @@ store.subscribe(() => {
         if (r.status === 409) {
           _serverInfo.rev = Number(json?.server?.rev) || _serverInfo.rev;
           _serverInfo.updatedAt = Number(json?.server?.updatedAt) || _serverInfo.updatedAt;
-          carregadoDoServidor = false;
-          if (!_conflitoNotificado) {
-            _conflitoNotificado = true;
-            alert('Conflito de sincronização: o servidor tem alterações mais recentes. Vá em Parâmetros → Sincronização para resolver (Baixar/Enviar).');
-          }
-          render(store.getState());
+          await _autoResolverConflito();
           return;
         }
         if (r.ok) {
@@ -601,7 +654,11 @@ function renderComanda(state) {
   `;
 
   const isMobile = !!(window.matchMedia && window.matchMedia('(max-width: 980px)').matches);
-  const disponiveis = store.getProdutosDisponiveis();
+  const disponiveis = store.getProdutosDisponiveis(mesa.tipo);
+  const pctOnline = Number.isFinite(Number(state.empresa?.precoOnlinePct)) ? Number(state.empresa.precoOnlinePct) : 0;
+  const precoLista = (p) => (mesa.tipo === 'online')
+    ? Math.round((Number(p.preco) * (1 + (pctOnline / 100))) * 100) / 100
+    : Number(p.preco) || 0;
   const userFull = (state.usuarios || []).find(u => u.id === state.usuarioAtivo?.id) || {};
   const favSet = new Set((Array.isArray(userFull.favoritos) ? userFull.favoritos : []).map(Number).filter(Boolean));
   const recentes = (Array.isArray(userFull.recentes) ? userFull.recentes : []).map(Number).filter(Boolean);
@@ -612,7 +669,7 @@ function renderComanda(state) {
   const activeCat = cats.includes(_mobileProdCat) ? _mobileProdCat : '';
   if (_mobileProdCat && !activeCat) _mobileProdCat = '';
   const opcoesSelect = disponiveis
-    .map(p => `<option value="${p.id}">${p.nome} — ${formatBRL(p.preco)}</option>`)
+    .map(p => `<option value="${p.id}">${p.nome} — ${formatBRL(precoLista(p))}</option>`)
     .join('');
 
   const escAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -637,7 +694,7 @@ function renderComanda(state) {
           : `<div class="thumb placeholder" title="Sem imagem">🖼️</div>`
         }
         <div class="prod-nome">${p.nome}</div>
-        <div class="prod-preco">${formatBRL(p.preco)}</div>
+        <div class="prod-preco">${formatBRL(precoLista(p))}</div>
       </button>
     `).join('');
 
@@ -825,7 +882,7 @@ function renderManutencaoProdutos(state) {
       ${p.imagem ? `<img class="thumb" src="${p.imagem}" alt="" onerror="this.style.display='none'">` : ''}
       <div class="item-info">
         <div class="item-nome">${p.nome}</div>
-        <div class="item-preco">${p.cat}${p.subcat ? ` · ${p.subcat}` : ''} · ${formatBRL(p.preco)}</div>
+        <div class="item-preco">${p.cat}${p.subcat ? ` · ${p.subcat}` : ''}${String(p.tipo || '').toLowerCase() === 'combo' ? ' · Combo' : ''}${p.somenteOnline ? ' · Online' : ''} · ${formatBRL(p.preco)}</div>
       </div>
       <div class="row" style="gap:8px">
         <button class="edit-btn" onclick="app.editProduto(${p.id})" title="Editar">✏️</button>
@@ -922,12 +979,14 @@ function renderConfiguracoes(state) {
   const tel = document.getElementById('f-empresa-telefone');
   const end = document.getElementById('f-empresa-endereco');
   const taxaEntrega = document.getElementById('f-empresa-taxa-entrega');
+  const onlinePct = document.getElementById('f-empresa-online-pct');
   const pix = document.getElementById('f-empresa-pix');
   const rod = document.getElementById('f-empresa-rodape');
   const emp = state.empresa || {};
   if (tel && tel.value !== String(emp.telefone || '')) tel.value = String(emp.telefone || '');
   if (end && end.value !== String(emp.endereco || '')) end.value = String(emp.endereco || '');
   if (taxaEntrega && taxaEntrega.value !== String(Number(emp.taxaEntregaPadrao || 0))) taxaEntrega.value = String(Number(emp.taxaEntregaPadrao || 0));
+  if (onlinePct && onlinePct.value !== String(Number(emp.precoOnlinePct || 0))) onlinePct.value = String(Number(emp.precoOnlinePct || 0));
   if (pix && pix.value !== String(emp.pixCopiaECola || '')) pix.value = String(emp.pixCopiaECola || '');
   if (rod && rod.value !== String(emp.mensagemRodape || '')) rod.value = String(emp.mensagemRodape || '');
 
@@ -1018,6 +1077,39 @@ function renderConfiguracoes(state) {
         .join('');
     }
   }
+
+  const precosEl = document.getElementById('lista-precos-online');
+  if (precosEl) {
+    const pct = Number.isFinite(Number(state.empresa?.precoOnlinePct)) ? Number(state.empresa.precoOnlinePct) : 0;
+    const prods = (Array.isArray(state.produtos) ? state.produtos : [])
+      .filter(p => Number(p?.id) > 0 && String(p?.nome || '').trim())
+      .slice()
+      .sort((a, b) => {
+        const ca = String(a?.cat || '').localeCompare(String(b?.cat || ''), 'pt-BR');
+        if (ca !== 0) return ca;
+        return String(a?.nome || '').localeCompare(String(b?.nome || ''), 'pt-BR');
+      });
+
+    if (!prods.length) {
+      precosEl.innerHTML = '<p class="empty-msg">Nenhum produto cadastrado.</p>';
+    } else {
+      const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+      const calcOnline = (base) => round2((Number(base) || 0) * (1 + (pct / 100)));
+      precosEl.innerHTML = [
+        `<div class="simple-item"><span><b>Ajuste online:</b> ${pct}%</span><span>${prods.length} item(ns)</span></div>`,
+        ...prods.map(p => {
+          const base = Number(p?.preco) || 0;
+          const online = calcOnline(base);
+          const tipo = String(p?.tipo || '').toLowerCase() === 'combo' ? 'Combo' : '';
+          const only = p?.somenteOnline ? 'Online' : '';
+          const tags = [tipo, only].filter(Boolean).join(' · ');
+          const left = `${String(p?.nome || '').trim()}${tags ? ` <span style="color:#777">· ${tags}</span>` : ''}`;
+          const right = `${formatBRL(base)} → ${formatBRL(online)}`;
+          return `<div class="simple-item"><span>${left}</span><span>${right}</span></div>`;
+        }),
+      ].join('');
+    }
+  }
 }
 
 function _snapshotFromRawState(raw) {
@@ -1059,6 +1151,7 @@ function _salvarEmpresa() {
       telefone: document.getElementById('f-empresa-telefone')?.value || '',
       endereco: document.getElementById('f-empresa-endereco')?.value || '',
       taxaEntregaPadrao: parseFloat(String(document.getElementById('f-empresa-taxa-entrega')?.value || '').replace(',', '.')) || 0,
+      precoOnlinePct: parseFloat(String(document.getElementById('f-empresa-online-pct')?.value || '').replace(',', '.')) || 0,
       pixCopiaECola: document.getElementById('f-empresa-pix')?.value || '',
       mensagemRodape: document.getElementById('f-empresa-rodape')?.value || '',
     });
@@ -1630,9 +1723,15 @@ function _bootClienteMode() {
   const _flowKind = (Number(_urlParams.get('mesa')) || 0) ? 'mesa' : 'online';
   let mesaId = Number(_urlParams.get('mesa')) || 0;
   let token = String(_urlParams.get('token') || '').trim();
-  let clienteNome = '';
-  let clienteTelefone = '';
-  let clienteApelido = '';
+  let authToken = '';
+  let clienteMe = null;
+  let authMode = 'login';
+  let authNome = '';
+  let authApelido = '';
+  let authTelefone = '';
+  let authSenha = '';
+  let step = 'menu';
+
   let clienteEntregaTipo = 'entrega';
   let clienteEnderecoTexto = '';
   let clienteReferencia = '';
@@ -1642,10 +1741,14 @@ function _bootClienteMode() {
   let clienteFormaPagamento = '';
   let clienteTrocoPara = '';
   let clienteObservacao = '';
+  let tipoLista = 'all';
+  let pedidos = [];
+  let pedidosLoading = false;
   try {
-    clienteNome = localStorage.getItem('clienteNome') || '';
-    clienteTelefone = localStorage.getItem('clienteTelefone') || '';
-    clienteApelido = localStorage.getItem('clienteApelido') || '';
+    authToken = localStorage.getItem('clienteAuthToken') || '';
+    authNome = localStorage.getItem('clienteNome') || '';
+    authTelefone = localStorage.getItem('clienteTelefone') || '';
+    authApelido = localStorage.getItem('clienteApelido') || '';
     clienteEntregaTipo = localStorage.getItem('clienteEntregaTipo') || 'entrega';
     clienteEnderecoTexto = localStorage.getItem('clienteEnderecoTexto') || '';
     clienteReferencia = localStorage.getItem('clienteReferencia') || '';
@@ -1682,6 +1785,48 @@ function _bootClienteMode() {
     return d;
   }
 
+  async function _apiFetch(path, opts = {}) {
+    const headers = { ...(opts.headers || {}) };
+    if (!headers['Content-Type'] && opts.body) headers['Content-Type'] = 'application/json';
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    return fetch(path, { ...opts, headers });
+  }
+
+  async function _loadMe() {
+    if (!_flowKind || _flowKind !== 'online') return;
+    if (!authToken) { clienteMe = null; return; }
+    try {
+      const r = await _apiFetch('/api/client/me', { method: 'GET' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) throw new Error(j?.error || 'Falha');
+      clienteMe = j?.cliente || null;
+      try {
+        if (clienteMe?.nome) localStorage.setItem('clienteNome', String(clienteMe.nome || ''));
+        if (clienteMe?.telefone) localStorage.setItem('clienteTelefone', String(clienteMe.telefone || ''));
+        if (clienteMe?.apelido) localStorage.setItem('clienteApelido', String(clienteMe.apelido || ''));
+      } catch {}
+    } catch {
+      clienteMe = null;
+      authToken = '';
+      try { localStorage.removeItem('clienteAuthToken'); } catch {}
+    }
+  }
+
+  async function _loadPedidos() {
+    if (pedidosLoading) return;
+    pedidosLoading = true;
+    try {
+      const r = await _apiFetch('/api/client/orders', { method: 'GET' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) throw new Error(j?.error || 'Falha');
+      pedidos = Array.isArray(j?.pedidos) ? j.pedidos : [];
+    } catch {
+      pedidos = [];
+    } finally {
+      pedidosLoading = false;
+    }
+  }
+
   async function _fetchStatus() {
     if (!mesaId || !token) return;
     try {
@@ -1703,9 +1848,6 @@ function _bootClienteMode() {
 
   function _persistCliente() {
     try {
-      localStorage.setItem('clienteNome', String(clienteNome || ''));
-      localStorage.setItem('clienteTelefone', String(clienteTelefone || ''));
-      localStorage.setItem('clienteApelido', String(clienteApelido || ''));
       localStorage.setItem('clienteEntregaTipo', String(clienteEntregaTipo || 'entrega'));
       localStorage.setItem('clienteEnderecoTexto', String(clienteEnderecoTexto || ''));
       localStorage.setItem('clienteReferencia', String(clienteReferencia || ''));
@@ -1718,17 +1860,47 @@ function _bootClienteMode() {
     } catch {}
   }
 
+  function _isCombo(p) {
+    const t = String(p?.tipo || '').toLowerCase();
+    if (t === 'combo') return true;
+    const n = String(p?.nome || '').toLowerCase();
+    const c = String(p?.cat || '').toLowerCase();
+    const s = String(p?.subcat || '').toLowerCase();
+    return c === 'combo' || s === 'combo' || n.includes('combo');
+  }
+
+  function _logout() {
+    authToken = '';
+    clienteMe = null;
+    try { localStorage.removeItem('clienteAuthToken'); } catch {}
+    step = 'auth';
+    renderCliente();
+  }
+
   function renderCliente() {
     const empresaNome = (menu?.empresa?.nome || 'Espetinho 075').trim();
     const cats = Array.isArray(menu?.categorias) ? menu.categorias.filter(Boolean) : [];
     const pgs = Array.isArray(menu?.formasPagamento) ? menu.formasPagamento.filter(Boolean) : [];
     const produtos = Array.isArray(menu?.produtos) ? menu.produtos : [];
+    const isOnlineFlow = _flowKind === 'online';
+    const pctOnline = Number.isFinite(Number(menu?.empresa?.precoOnlinePct)) ? Number(menu.empresa.precoOnlinePct) : 0;
+    const precoLista = (p) => {
+      const base = Number(p?.preco) || 0;
+      if (!isOnlineFlow) return base;
+      return Math.round((base * (1 + (pctOnline / 100))) * 100) / 100;
+    };
+
+    if (isOnlineFlow && !mesaId && !authToken) step = 'auth';
+    if (mesaId && token) step = 'status';
 
     const qNorm = String(q || '').trim().toLowerCase();
     const itensCart = Array.from(cart.entries()).map(([id, qty]) => ({ id: Number(id) || 0, qty: Number(qty) || 0 })).filter(x => x.id && x.qty > 0);
     const cartById = new Map(itensCart.map(x => [x.id, x.qty]));
 
+    if (!isOnlineFlow && tipoLista === 'combo') tipoLista = 'prod';
     const visiveis = produtos
+      .filter(p => (tipoLista === 'combo' ? _isCombo(p) : (tipoLista === 'prod' ? !_isCombo(p) : true)))
+      .filter(p => (isOnlineFlow ? true : !p?.somenteOnline))
       .filter(p => (cat ? p.cat === cat : true))
       .filter(p => (qNorm ? String(p.nome || '').toLowerCase().includes(qNorm) : true))
       .slice()
@@ -1738,14 +1910,13 @@ function _bootClienteMode() {
       .map(it => {
         const p = produtos.find(x => Number(x.id) === Number(it.id));
         if (!p) return null;
-        return { ...it, nome: p.nome, preco: Number(p.preco) || 0 };
+        return { ...it, nome: p.nome, preco: precoLista(p) };
       })
       .filter(Boolean);
     const subtotalCart = cartDetalhes.reduce((soma, it) => soma + (Number(it.preco) || 0) * (Number(it.qty) || 0), 0);
 
     const statusLabel = String(orderInfo?.status?.label || '').trim();
     const showStatus = !!(mesaId && token && (statusLabel || orderItens.length));
-    const isOnlineFlow = _flowKind === 'online';
     const ent = (String(clienteEntregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
     const showEndereco = isOnlineFlow && ent !== 'retirada';
     const pgLower = String(clienteFormaPagamento || '').toLowerCase();
@@ -1761,11 +1932,71 @@ function _bootClienteMode() {
     const waMsg = mesaId ? `Olá! Quero falar sobre o Pedido Nº ${mesaId}.` : 'Olá! Quero fazer um pedido.';
     const waLink = empresaTelNorm ? `https://wa.me/${encodeURIComponent(empresaTelNorm)}?text=${encodeURIComponent(waMsg)}` : '';
 
+    const isAuth = step === 'auth';
+    const isMenu = step === 'menu';
+    const isDelivery = step === 'delivery';
+    const isPayment = step === 'payment';
+    const isHistory = step === 'history';
+    const canSeeWizard = isOnlineFlow && !!authToken && !mesaId;
+
     root.innerHTML = `
       <div class="cliente-top">
         <div class="cliente-title">${empresaNome}</div>
         <div class="cliente-sub">${_tituloMesa()}</div>
       </div>
+
+      ${isOnlineFlow ? `
+        <div class="card cliente-card" style="margin-bottom:12px">
+          <div class="row" style="justify-content:space-between; gap:8px; flex-wrap:wrap">
+            <div class="row" style="gap:8px; flex-wrap:wrap">
+              <button class="chip ${isAuth ? 'active' : ''}" id="c-step-auth">Cadastro</button>
+              <button class="chip ${isMenu ? 'active' : ''}" id="c-step-menu" ${(!authToken || mesaId) ? 'disabled style="opacity:0.5"' : ''}>Itens</button>
+              <button class="chip ${isDelivery ? 'active' : ''}" id="c-step-delivery" ${(!authToken || mesaId) ? 'disabled style="opacity:0.5"' : ''}>Entrega</button>
+              <button class="chip ${isPayment ? 'active' : ''}" id="c-step-payment" ${(!authToken || mesaId) ? 'disabled style="opacity:0.5"' : ''}>Pagamento</button>
+              <button class="chip ${isHistory ? 'active' : ''}" id="c-step-history" ${(!authToken) ? 'disabled style="opacity:0.5"' : ''}>Histórico</button>
+            </div>
+            <div class="row" style="gap:8px; align-items:center">
+              ${authToken ? `<span class="badge badge-gray">${String(clienteMe?.apelido || clienteMe?.nome || 'Cliente').trim() || 'Cliente'}</span>` : ''}
+              ${authToken ? `<button class="btn btn-sm" id="c-logout">Sair</button>` : ''}
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      ${isAuth ? `
+        <div class="card cliente-card">
+          <div class="row" style="gap:8px; margin-bottom:10px">
+            <button class="chip ${authMode === 'login' ? 'active' : ''}" id="c-auth-login">Entrar</button>
+            <button class="chip ${authMode === 'register' ? 'active' : ''}" id="c-auth-register">Cadastrar</button>
+          </div>
+          ${authMode === 'register' ? `
+            <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+              <div class="form-group" style="flex:1; min-width:180px">
+                <label style="font-size:12px; font-weight:700; color:#666">Seu nome</label>
+                <input id="c-auth-nome" type="text" value="${String(authNome || '').replace(/"/g, '&quot;')}" />
+              </div>
+              <div class="form-group" style="flex:1; min-width:180px">
+                <label style="font-size:12px; font-weight:700; color:#666">Como quer ser chamado</label>
+                <input id="c-auth-apelido" type="text" value="${String(authApelido || '').replace(/"/g, '&quot;')}" />
+              </div>
+            </div>
+          ` : ''}
+          <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+            <div class="form-group" style="flex:1; min-width:180px">
+              <label style="font-size:12px; font-weight:700; color:#666">WhatsApp</label>
+              <input id="c-auth-tel" type="tel" value="${String(authTelefone || '').replace(/"/g, '&quot;')}" />
+            </div>
+            <div class="form-group" style="flex:1; min-width:180px">
+              <label style="font-size:12px; font-weight:700; color:#666">Senha</label>
+              <input id="c-auth-senha" type="password" value="" />
+            </div>
+          </div>
+          <div class="row" style="gap:8px; justify-content:flex-end">
+            <button class="btn btn-primary" id="c-auth-submit">${authMode === 'login' ? 'Entrar' : 'Cadastrar'}</button>
+          </div>
+          <div class="empty-msg" id="cliente-status" style="padding:10px 0; display:${status ? 'block' : 'none'}">${status || ''}</div>
+        </div>
+      ` : ''}
 
       ${showStatus ? `
         <div class="card cliente-card" style="margin-bottom:12px">
@@ -1788,8 +2019,38 @@ function _bootClienteMode() {
         </div>
       ` : ''}
 
-      <div class="card cliente-card">
+      ${isHistory ? `
+        <div class="card cliente-card">
+          ${(pedidosLoading ? `<div class="empty-msg" style="padding:8px 0">Carregando...</div>` : '')}
+          ${(!pedidosLoading && pedidos.length === 0) ? `<div class="empty-msg" style="padding:8px 0">Nenhum pedido ainda.</div>` : ''}
+          <div class="simple-list" style="gap:8px">
+            ${(!pedidosLoading ? pedidos.map(p => {
+              const when = p.ts ? new Date(p.ts).toLocaleString('pt-BR') : '';
+              const label = String(p?.status?.label || '').trim() || '—';
+              return `
+                <div class="simple-item" style="align-items:flex-start">
+                  <span>
+                    <b>Pedido ${p.mesaId}</b> · ${when}<br>
+                    <span style="color:#555; font-size:12px">${label} · Total ${formatBRL(Number(p.total) || 0)}</span>
+                  </span>
+                  <div class="row" style="gap:8px">
+                    ${p.trackUrl ? `<button class="btn btn-sm" data-act="open" data-url="${String(p.trackUrl).replace(/"/g, '&quot;')}">Ver</button>` : ''}
+                  </div>
+                </div>
+              `;
+            }).join('') : '')}
+          </div>
+        </div>
+      ` : ''}
+
+      ${(isMenu || _flowKind === 'mesa') ? `
+      <div class="card cliente-card" style="display:${isMenu || _flowKind === 'mesa' ? 'block' : 'none'}">
         <div class="prod-search"><input id="cliente-busca" type="search" placeholder="Buscar..." value="${String(q || '').replace(/"/g, '&quot;')}" /></div>
+        <div class="prod-filters" style="margin-bottom:10px" id="cliente-tipo">
+          <button class="chip ${tipoLista === 'all' ? 'active' : ''}" data-t="all">Todos</button>
+          <button class="chip ${tipoLista === 'prod' ? 'active' : ''}" data-t="prod">Produtos</button>
+          ${isOnlineFlow ? `<button class="chip ${tipoLista === 'combo' ? 'active' : ''}" data-t="combo">Combos</button>` : ''}
+        </div>
         <div class="prod-filters" id="cliente-cats">
           <button class="chip ${!cat ? 'active' : ''}" data-cat="">Todos</button>
           ${cats.map(c => `<button class="chip ${c === cat ? 'active' : ''}" data-cat="${String(c).replace(/"/g, '&quot;')}">${c}</button>`).join('')}
@@ -1802,29 +2063,17 @@ function _bootClienteMode() {
               <button class="prod-btn" data-id="${p.id}" ${dis ? 'disabled style="opacity:0.4"' : ''}>
                 ${p.imagem ? `<img class="thumb" src="${p.imagem}" alt="" onerror="this.style.display='none'">` : `<div class="thumb placeholder">🖼️</div>`}
                 <div class="prod-nome">${p.nome}</div>
-                <div class="prod-preco">${formatBRL(Number(p.preco) || 0)}${inCart ? ` · ${inCart}x` : ''}${dis ? ' · Indisponível' : ''}</div>
+                <div class="prod-preco">${formatBRL(precoLista(p))}${inCart ? ` · ${inCart}x` : ''}${dis ? ' · Indisponível' : ''}</div>
               </button>
             `;
           }).join('')}
         </div>
         <div id="cliente-prods-empty" class="empty-msg" style="display:${visiveis.length ? 'none' : 'block'}">Nenhum item encontrado.</div>
       </div>
+      ` : ''}
 
-      <div class="card cliente-card" style="margin-top:12px">
-        <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
-          <div class="form-group" style="flex:1; min-width:180px">
-            <label style="font-size:12px; font-weight:700; color:#666">Seu nome</label>
-            <input id="cliente-nome" type="text" placeholder="Ex: João" value="${String(clienteNome || '').replace(/"/g, '&quot;')}" />
-          </div>
-          <div class="form-group" style="flex:1; min-width:180px">
-            <label style="font-size:12px; font-weight:700; color:#666">Como quer ser chamado</label>
-            <input id="cliente-apelido" type="text" placeholder="Ex: Joãozinho" value="${String(clienteApelido || '').replace(/"/g, '&quot;')}" />
-          </div>
-          <div class="form-group" style="flex:1; min-width:180px">
-            <label style="font-size:12px; font-weight:700; color:#666">WhatsApp</label>
-            <input id="cliente-telefone" type="tel" placeholder="Ex: (75) 99999-9999" value="${String(clienteTelefone || '').replace(/"/g, '&quot;')}" />
-          </div>
-        </div>
+      ${(canSeeWizard || _flowKind === 'mesa') ? `
+      <div class="card cliente-card" style="margin-top:12px; display:${(isDelivery || isPayment || _flowKind === 'mesa') ? 'block' : 'none'}">
 
         ${isOnlineFlow ? `
           <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
@@ -1833,13 +2082,6 @@ function _bootClienteMode() {
               <select id="cliente-entrega-tipo" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">
                 <option value="entrega" ${ent === 'entrega' ? 'selected' : ''}>Entrega</option>
                 <option value="retirada" ${ent === 'retirada' ? 'selected' : ''}>Retirada</option>
-              </select>
-            </div>
-            <div class="form-group" style="flex:1; min-width:180px">
-              <label style="font-size:12px; font-weight:700; color:#666">Forma de pagamento</label>
-              <select id="cliente-pagamento" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">
-                <option value="">Selecione...</option>
-                ${(pgs.length ? pgs : ['Dinheiro', 'PIX', 'Cartão']).map(pg => `<option value="${String(pg).replace(/"/g, '&quot;')}" ${String(clienteFormaPagamento||'')===String(pg)?'selected':''}>${pg}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -1867,16 +2109,37 @@ function _bootClienteMode() {
             </div>
           ` : ''}
 
-          ${showTroco ? `
-            <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+        ` : ''}
+
+        <div class="row" style="gap:8px; justify-content:space-between; align-items:center; margin-top:6px">
+          <div style="font-weight:700">${isDelivery ? 'Entrega' : 'Pagamento'}</div>
+          <div class="badge badge-blue">${formatBRL(totalFinal)}</div>
+        </div>
+        ${taxaEntregaEfetiva > 0 ? `
+          <div class="total-bar" style="margin-top:8px">
+            <span class="total-label">Entrega</span>
+            <div class="spacer"></div>
+            <span class="total-val" style="font-size:14px">${formatBRL(taxaEntregaEfetiva)}</span>
+          </div>
+        ` : ''}
+
+        ${isPayment || _flowKind === 'mesa' ? `
+          <div class="row" style="gap:10px; margin-top:10px; flex-wrap:wrap">
+            <div class="form-group" style="flex:1; min-width:180px">
+              <label style="font-size:12px; font-weight:700; color:#666">Forma de pagamento</label>
+              <select id="cliente-pagamento" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">
+                <option value="">Selecione...</option>
+                ${(pgs.length ? pgs : ['Dinheiro', 'PIX', 'Cartão']).map(pg => `<option value="${String(pg).replace(/"/g, '&quot;')}" ${String(clienteFormaPagamento||'')===String(pg)?'selected':''}>${pg}</option>`).join('')}
+              </select>
+            </div>
+            ${showTroco ? `
               <div class="form-group" style="flex:1; min-width:180px">
                 <label style="font-size:12px; font-weight:700; color:#666">Troco para (R$)</label>
                 <input id="cliente-troco" type="number" placeholder="0.00" min="0" step="0.01" value="${String(clienteTrocoPara || '').replace(/"/g, '&quot;')}" />
               </div>
-            </div>
-          ` : ''}
-
-          <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+            ` : ''}
+          </div>
+          <div class="row" style="gap:10px; margin-top:10px; flex-wrap:wrap">
             <div class="form-group" style="flex:1; min-width:220px">
               <label style="font-size:12px; font-weight:700; color:#666">Observações (opcional)</label>
               <textarea id="cliente-obs" rows="2" placeholder="Ex: sem cebola, caprichar no molho...">${String(clienteObservacao || '').replace(/</g, '&lt;')}</textarea>
@@ -1884,17 +2147,6 @@ function _bootClienteMode() {
           </div>
         ` : ''}
 
-        <div class="row" style="justify-content:space-between; margin-bottom:10px">
-          <div style="font-weight:700">Seu pedido</div>
-          <div class="badge badge-blue">${formatBRL(totalFinal)}</div>
-        </div>
-        ${taxaEntregaEfetiva > 0 ? `
-          <div class="total-bar" style="margin-bottom:10px">
-            <span class="total-label">Entrega</span>
-            <div class="spacer"></div>
-            <span class="total-val">${formatBRL(taxaEntregaEfetiva)}</span>
-          </div>
-        ` : ''}
         <div id="cliente-cart">
           ${cartDetalhes.length
             ? cartDetalhes.map(it => `
@@ -1913,13 +2165,75 @@ function _bootClienteMode() {
             : `<p class="empty-msg" style="padding:10px 0">Toque nos itens para adicionar.</p>`
           }
         </div>
-        <div class="row" style="gap:8px; margin-top:10px">
+        <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap">
           <button class="btn" id="cliente-limpar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Limpar</button>
-          <button class="btn btn-primary" id="cliente-enviar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Enviar pedido</button>
+          ${canSeeWizard ? `
+            ${isMenu ? `<button class="btn btn-primary" id="c-next-menu" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Continuar</button>` : ''}
+            ${isDelivery ? `<button class="btn btn-primary" id="c-next-delivery" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Ir para pagamento</button>` : ''}
+            ${isPayment ? `<button class="btn btn-primary" id="cliente-enviar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Confirmar pedido</button>` : ''}
+          ` : `<button class="btn btn-primary" id="cliente-enviar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Enviar pedido</button>`}
         </div>
         <div class="empty-msg" id="cliente-status" style="padding:10px 0; display:${status ? 'block' : 'none'}">${status || ''}</div>
       </div>
+      ` : ''}
     `;
+
+    const btnLogout = root.querySelector('#c-logout');
+    if (btnLogout) btnLogout.addEventListener('click', _logout);
+
+    const btnStepAuth = root.querySelector('#c-step-auth');
+    const btnStepMenu = root.querySelector('#c-step-menu');
+    const btnStepDelivery = root.querySelector('#c-step-delivery');
+    const btnStepPayment = root.querySelector('#c-step-payment');
+    const btnStepHistory = root.querySelector('#c-step-history');
+    if (btnStepAuth) btnStepAuth.addEventListener('click', () => { step = 'auth'; renderCliente(); });
+    if (btnStepMenu) btnStepMenu.addEventListener('click', () => { if (authToken && !mesaId) { step = 'menu'; renderCliente(); } });
+    if (btnStepDelivery) btnStepDelivery.addEventListener('click', () => { if (authToken && !mesaId) { step = 'delivery'; renderCliente(); } });
+    if (btnStepPayment) btnStepPayment.addEventListener('click', () => { if (authToken && !mesaId) { step = 'payment'; renderCliente(); } });
+    if (btnStepHistory) btnStepHistory.addEventListener('click', async () => { if (authToken) { step = 'history'; await _loadPedidos(); renderCliente(); } });
+
+    const btnAuthLogin = root.querySelector('#c-auth-login');
+    const btnAuthRegister = root.querySelector('#c-auth-register');
+    if (btnAuthLogin) btnAuthLogin.addEventListener('click', () => { authMode = 'login'; status = ''; renderCliente(); });
+    if (btnAuthRegister) btnAuthRegister.addEventListener('click', () => { authMode = 'register'; status = ''; renderCliente(); });
+    const btnAuthSubmit = root.querySelector('#c-auth-submit');
+    if (btnAuthSubmit) {
+      btnAuthSubmit.addEventListener('click', async () => {
+        const nome = String(root.querySelector('#c-auth-nome')?.value || '').trim();
+        const ap = String(root.querySelector('#c-auth-apelido')?.value || '').trim();
+        const tel = String(root.querySelector('#c-auth-tel')?.value || '').trim();
+        const senha = String(root.querySelector('#c-auth-senha')?.value || '').trim();
+        if (authMode === 'register' && !nome) { status = 'Informe seu nome.'; renderCliente(); return; }
+        if (!tel) { status = 'Informe seu WhatsApp/telefone.'; renderCliente(); return; }
+        if (!senha) { status = 'Informe sua senha.'; renderCliente(); return; }
+        status = 'Enviando...';
+        renderCliente();
+        try {
+          const endpoint = authMode === 'register' ? '/api/client/register' : '/api/client/login';
+          const body = authMode === 'register' ? { nome, apelido: ap, telefone: tel, senha } : { telefone: tel, senha };
+          const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok || !j?.ok) { status = String(j?.error || 'Falha.'); renderCliente(); return; }
+          authToken = String(j?.token || '');
+          try { localStorage.setItem('clienteAuthToken', authToken); } catch {}
+          authNome = nome || authNome;
+          authApelido = ap || authApelido;
+          authTelefone = tel || authTelefone;
+          try {
+            if (authNome) localStorage.setItem('clienteNome', authNome);
+            if (authApelido) localStorage.setItem('clienteApelido', authApelido);
+            if (authTelefone) localStorage.setItem('clienteTelefone', authTelefone);
+          } catch {}
+          status = '';
+          await _loadMe();
+          step = 'menu';
+          renderCliente();
+        } catch {
+          status = 'Sem conexão. Tente novamente.';
+          renderCliente();
+        }
+      });
+    }
 
     const busca = root.querySelector('#cliente-busca');
     if (busca) {
@@ -1929,27 +2243,6 @@ function _bootClienteMode() {
       });
     }
 
-    const inpNome = root.querySelector('#cliente-nome');
-    if (inpNome) {
-      inpNome.addEventListener('input', (e) => {
-        clienteNome = String(e.target.value || '');
-        _persistCliente();
-      });
-    }
-    const inpApelido = root.querySelector('#cliente-apelido');
-    if (inpApelido) {
-      inpApelido.addEventListener('input', (e) => {
-        clienteApelido = String(e.target.value || '');
-        _persistCliente();
-      });
-    }
-    const inpTel = root.querySelector('#cliente-telefone');
-    if (inpTel) {
-      inpTel.addEventListener('input', (e) => {
-        clienteTelefone = String(e.target.value || '');
-        _persistCliente();
-      });
-    }
     const selEntrega = root.querySelector('#cliente-entrega-tipo');
     if (selEntrega) {
       selEntrega.addEventListener('change', (e) => {
@@ -2063,6 +2356,17 @@ function _bootClienteMode() {
       });
     }
 
+    const tipoEl = root.querySelector('#cliente-tipo');
+    if (tipoEl) {
+      tipoEl.addEventListener('click', (e) => {
+        const b = e.target.closest('.chip');
+        if (!b) return;
+        const t = String(b.getAttribute('data-t') || 'all');
+        tipoLista = (t === 'combo' ? 'combo' : (t === 'prod' ? 'prod' : 'all'));
+        renderCliente();
+      });
+    }
+
     const catsEl = root.querySelector('#cliente-cats');
     if (catsEl) {
       catsEl.addEventListener('click', (e) => {
@@ -2117,6 +2421,29 @@ function _bootClienteMode() {
       });
     }
 
+    const btnNextMenu = root.querySelector('#c-next-menu');
+    if (btnNextMenu) {
+      btnNextMenu.addEventListener('click', () => {
+        if (!itensCart.length) return;
+        step = 'delivery';
+        status = '';
+        renderCliente();
+      });
+    }
+    const btnNextDelivery = root.querySelector('#c-next-delivery');
+    if (btnNextDelivery) {
+      btnNextDelivery.addEventListener('click', () => {
+        if (!itensCart.length) return;
+        const entNow = (String(clienteEntregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
+        const hasLatLng = Number.isFinite(Number(clienteLat)) && Number.isFinite(Number(clienteLng));
+        const hasEndereco = !!String(clienteEnderecoTexto || '').trim() || !!String(clienteMapsUrl || '').trim() || hasLatLng;
+        if (entNow === 'entrega' && !hasEndereco) { status = 'Informe o endereço de entrega.'; renderCliente(); return; }
+        step = 'payment';
+        status = '';
+        renderCliente();
+      });
+    }
+
     const btnEnviar = root.querySelector('#cliente-enviar');
     if (btnEnviar) {
       btnEnviar.addEventListener('click', async () => {
@@ -2127,31 +2454,24 @@ function _bootClienteMode() {
           renderCliente();
           return;
         }
-        if (!mesaId) {
-          if (!String(clienteNome || '').trim()) { status = 'Informe seu nome.'; renderCliente(); return; }
-          if (!String(clienteTelefone || '').trim()) { status = 'Informe seu WhatsApp/telefone.'; renderCliente(); return; }
-          if (isOnlineFlow) {
-            const entNow = (String(clienteEntregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
-            const hasLatLng = Number.isFinite(Number(clienteLat)) && Number.isFinite(Number(clienteLng));
-            const hasEndereco = !!String(clienteEnderecoTexto || '').trim() || !!String(clienteMapsUrl || '').trim() || hasLatLng;
-            if (entNow === 'entrega' && !hasEndereco) { status = 'Informe o endereço de entrega.'; renderCliente(); return; }
-            if (!String(clienteFormaPagamento || '').trim()) { status = 'Escolha a forma de pagamento.'; renderCliente(); return; }
-          }
+        if (!mesaId && isOnlineFlow && !authToken) { status = 'Faça login.'; step = 'auth'; renderCliente(); return; }
+        if (isOnlineFlow) {
+          const entNow = (String(clienteEntregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
+          const hasLatLng = Number.isFinite(Number(clienteLat)) && Number.isFinite(Number(clienteLng));
+          const hasEndereco = !!String(clienteEnderecoTexto || '').trim() || !!String(clienteMapsUrl || '').trim() || hasLatLng;
+          if (entNow === 'entrega' && !hasEndereco) { status = 'Informe o endereço de entrega.'; renderCliente(); return; }
+          if (!String(clienteFormaPagamento || '').trim()) { status = 'Escolha a forma de pagamento.'; renderCliente(); return; }
         }
         status = 'Enviando...';
         renderCliente();
         try {
-          const r = await fetch('/api/client/order', {
+          const r = await _apiFetch('/api/client/order', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               mesaId: mesaId || 0,
               token: token || '',
               itens: payloadItens,
               cliente: {
-                nome: clienteNome,
-                telefone: clienteTelefone,
-                apelido: clienteApelido,
                 entregaTipo: clienteEntregaTipo,
                 enderecoTexto: clienteEnderecoTexto,
                 referencia: clienteReferencia,
@@ -2190,6 +2510,17 @@ function _bootClienteMode() {
         }
       });
     }
+
+    const histEl = root.querySelector('.simple-list');
+    if (histEl) {
+      histEl.addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-act="open"]');
+        if (!b) return;
+        const u = String(b.getAttribute('data-url') || '');
+        if (!u) return;
+        try { window.location.href = u; } catch {}
+      });
+    }
   }
 
   fetch('/api/client/menu')
@@ -2197,7 +2528,10 @@ function _bootClienteMode() {
     .then(j => {
       if (!j?.ok) throw new Error(j?.error || 'Falha ao carregar cardápio.');
       menu = j?.data || { empresa: null, categorias: [], produtos: [] };
-      renderCliente();
+      _loadMe().finally(() => {
+        if (_flowKind === 'online' && !mesaId && authToken) step = 'menu';
+        renderCliente();
+      });
       _ensureStatusTimer();
     })
     .catch(() => {
@@ -3384,8 +3718,16 @@ function _prepararEdicao(id) {
   document.getElementById('f-cat').value = p.cat;
   if (document.getElementById('f-subcat')) document.getElementById('f-subcat').value = p.subcat || '';
   document.getElementById('f-preco').value = p.preco;
+  if (document.getElementById('f-tipo')) document.getElementById('f-tipo').value = (String(p.tipo || '').toLowerCase() === 'combo') ? 'combo' : 'produto';
+  if (document.getElementById('f-somente-online')) document.getElementById('f-somente-online').checked = !!p.somenteOnline;
   document.getElementById('f-estoque').value = p.estoque;
   if (document.getElementById('f-estoque-min')) document.getElementById('f-estoque-min').value = p.estoqueMinimo ?? 5;
+  const tipoEl = document.getElementById('f-tipo');
+  const chkOnline = document.getElementById('f-somente-online');
+  if (tipoEl && chkOnline) {
+    if (String(tipoEl.value) === 'combo') { chkOnline.checked = true; chkOnline.disabled = true; }
+    else chkOnline.disabled = false;
+  }
   
   document.getElementById('btn-add-text').textContent = 'Salvar Alterações';
   document.getElementById('btn-cancel-edit').style.display = 'inline-block';
@@ -3396,6 +3738,8 @@ function _cancelarEdicao() {
   document.getElementById('f-nome').value = '';
   if (document.getElementById('f-imagem')) document.getElementById('f-imagem').value = '';
   document.getElementById('f-preco').value = '';
+  if (document.getElementById('f-tipo')) document.getElementById('f-tipo').value = 'produto';
+  if (document.getElementById('f-somente-online')) { document.getElementById('f-somente-online').checked = false; document.getElementById('f-somente-online').disabled = false; }
   document.getElementById('f-estoque').value = '';
   if (document.getElementById('f-estoque-min')) document.getElementById('f-estoque-min').value = '';
   if (document.getElementById('f-subcat')) document.getElementById('f-subcat').value = '';
@@ -3418,6 +3762,8 @@ function _addProduto() {
     imagem:  document.getElementById('f-imagem') ? document.getElementById('f-imagem').value : '',
     cat:     document.getElementById('f-cat').value,
     subcat:  document.getElementById('f-subcat') ? document.getElementById('f-subcat').value : '',
+    tipo:    document.getElementById('f-tipo') ? document.getElementById('f-tipo').value : 'produto',
+    somenteOnline: document.getElementById('f-somente-online') ? document.getElementById('f-somente-online').checked : false,
     preco:   document.getElementById('f-preco').value,
     estoque: document.getElementById('f-estoque').value,
     estoqueMinimo: document.getElementById('f-estoque-min') ? document.getElementById('f-estoque-min').value : '',
@@ -3437,6 +3783,8 @@ function _addProduto() {
       document.getElementById('f-nome').value = '';
       if (document.getElementById('f-imagem')) document.getElementById('f-imagem').value = '';
       document.getElementById('f-preco').value = '';
+      if (document.getElementById('f-tipo')) document.getElementById('f-tipo').value = 'produto';
+      if (document.getElementById('f-somente-online')) { document.getElementById('f-somente-online').checked = false; document.getElementById('f-somente-online').disabled = false; }
       document.getElementById('f-estoque').value = '';
       if (document.getElementById('f-estoque-min')) document.getElementById('f-estoque-min').value = '';
       if (document.getElementById('f-subcat')) document.getElementById('f-subcat').value = '';
@@ -3602,6 +3950,17 @@ function _salvarPerfil() {
 }
 
 document.getElementById('f-cat')?.addEventListener('change', () => renderSubcategorias(store.getState()));
+document.getElementById('f-tipo')?.addEventListener('change', () => {
+  const tipoEl = document.getElementById('f-tipo');
+  const chk = document.getElementById('f-somente-online');
+  if (!tipoEl || !chk) return;
+  if (String(tipoEl.value) === 'combo') {
+    chk.checked = true;
+    chk.disabled = true;
+  } else {
+    chk.disabled = false;
+  }
+});
 document.getElementById('subcat-cat')?.addEventListener('change', () => renderSubcategorias(store.getState()));
 document.getElementById('backup-file')?.addEventListener('change', async (ev) => {
   const input = ev.target;

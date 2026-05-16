@@ -85,6 +85,9 @@ function criarEstadoInicial() {
     estoqueMov: [],
     clientes: [],           // { id, nome, telefone, createdAt, lastMesaId }
     proxClienteId: 1,
+    clienteSessions: {},    // { [token]: { clienteId, createdAt, lastAt } }
+    pedidosCliente: [],     // { id, clienteId, mesaId, ts, itens, subtotal, taxaEntrega, total }
+    proxPedidoClienteId: 1,
     /**
      * filaProducao: pedidos a serem preparados por setor (bar/cozinha/churrasco)
      */
@@ -98,6 +101,7 @@ function criarEstadoInicial() {
       logoUrl: 'assets/logo.jpg',
       mensagemRodape: 'Obrigado pela preferência!',
       taxaEntregaPadrao: 0,
+      precoOnlinePct: 0,
     },
     aparencia: {
       fundoOpacidade: 0.90,
@@ -539,15 +543,21 @@ export function criarStore() {
     const prod = getProduto(produtoId);
     if (!mesa) throw new Error(`Mesa ${mesaId} não encontrada.`);
     if (!prod) throw new Error(`Produto ${produtoId} não encontrado.`);
+    if (mesa.tipo !== 'online' && prod.somenteOnline) throw new Error(`"${prod.nome}" disponível apenas no pedido online.`);
     if (!state.permitirVendaSemEstoque && prod.estoque <= 0) throw new Error(`"${prod.nome}" sem estoque.`);
 
     if (mesa.status === 'livre') mesa.status = 'ocupada';
+
+    const pctOnline = Number.isFinite(Number(state.empresa?.precoOnlinePct)) ? Number(state.empresa.precoOnlinePct) : 0;
+    const precoVenda = (mesa.tipo === 'online')
+      ? Math.round((Number(prod.preco) * (1 + (pctOnline / 100))) * 100) / 100
+      : prod.preco;
 
     const item = mesa.itens.find(it => it.id === produtoId);
     if (item) {
       item.qty += 1;
     } else {
-      mesa.itens.push({ id: prod.id, nome: prod.nome, preco: prod.preco, qty: 1 });
+      mesa.itens.push({ id: prod.id, nome: prod.nome, preco: precoVenda, qty: 1 });
     }
     prod.estoque -= 1;
     _registrarMovEstoque({ produtoId: prod.id, delta: -1, motivo: 'venda', origem: 'pedido', mesaId });
@@ -595,9 +605,14 @@ export function criarStore() {
     if (delta > 0) {
       const prod = getProduto(produtoId);
       if (!prod) throw new Error('Produto não encontrado.');
+      if (mesa.tipo !== 'online' && prod.somenteOnline) throw new Error(`"${prod.nome}" disponível apenas no pedido online.`);
       if (!state.permitirVendaSemEstoque && prod.estoque <= 0) throw new Error('Sem estoque.');
       prod.estoque -= 1;
       item.qty += 1;
+      if (mesa.tipo === 'online') {
+        const pctOnline = Number.isFinite(Number(state.empresa?.precoOnlinePct)) ? Number(state.empresa.precoOnlinePct) : 0;
+        item.preco = Math.round((Number(prod.preco) * (1 + (pctOnline / 100))) * 100) / 100;
+      }
       _registrarMovEstoque({ produtoId, delta: -1, motivo: 'venda', origem: 'pedido', mesaId });
       _registrarProdutoRecente(produtoId);
       filaItem = criarFilaItem({ mesaId, prod, qty: 1 });
@@ -793,6 +808,8 @@ export function criarStore() {
       cat: catTxt,
       subcat: normalizarTexto(arguments[0]?.subcat),
       imagem: normalizarTexto(arguments[0]?.imagem),
+      tipo: (String(arguments[0]?.tipo || '').toLowerCase() === 'combo') ? 'combo' : 'produto',
+      somenteOnline: !!(String(arguments[0]?.tipo || '').toLowerCase() === 'combo' || arguments[0]?.somenteOnline),
       preco: precoNum,
       estoque: estoqueFinal,
       estoqueMinimo: minFinal,
@@ -820,6 +837,12 @@ export function criarStore() {
     }
     if (Object.prototype.hasOwnProperty.call(patch, 'subcat')) patch.subcat = normalizarTexto(patch.subcat);
     if (Object.prototype.hasOwnProperty.call(patch, 'imagem')) patch.imagem = normalizarTexto(patch.imagem);
+    if (Object.prototype.hasOwnProperty.call(patch, 'tipo')) {
+      const t = String(patch.tipo || '').trim().toLowerCase();
+      patch.tipo = (t === 'combo') ? 'combo' : 'produto';
+      if (patch.tipo === 'combo') patch.somenteOnline = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'somenteOnline')) patch.somenteOnline = !!patch.somenteOnline;
     if (Object.prototype.hasOwnProperty.call(patch, 'preco')) {
       const n = Number(patch.preco);
       if (!Number.isFinite(n) || n <= 0) throw new Error('Preço inválido.');
@@ -1117,9 +1140,11 @@ export function criarStore() {
     });
   }
 
-  function getProdutosDisponiveis() {
-    if (state.permitirVendaSemEstoque) return state.produtos;
-    return state.produtos.filter(p => p.estoque > 0);
+  function getProdutosDisponiveis(tipoMesa = '') {
+    const tipo = String(tipoMesa || '');
+    const base = state.permitirVendaSemEstoque ? state.produtos : state.produtos.filter(p => p.estoque > 0);
+    if (tipo === 'presencial') return base.filter(p => !p.somenteOnline);
+    return base;
   }
 
   function getMesasOcupadas() {
@@ -1157,6 +1182,11 @@ export function criarStore() {
       const v = Number(next.taxaEntregaPadrao);
       if (!Number.isFinite(v) || v < 0) throw new Error('Taxa de entrega inválida.');
       next.taxaEntregaPadrao = Math.max(0, v);
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'precoOnlinePct')) {
+      const v = Number(next.precoOnlinePct);
+      if (!Number.isFinite(v)) throw new Error('Percentual de preço online inválido.');
+      next.precoOnlinePct = Math.max(-50, Math.min(500, v));
     }
     state.empresa = next;
     logAcao('cadastros.atualizar_empresa', {});
@@ -1211,6 +1241,8 @@ export function criarStore() {
         nome: p.nome,
         cat: p.cat,
         subcat: p.subcat,
+        tipo: p.tipo,
+        somenteOnline: !!p.somenteOnline,
         preco: p.preco,
         estoque: p.estoque,
         estoqueMinimo: p.estoqueMinimo,
@@ -1269,6 +1301,8 @@ export function criarStore() {
     if (!s.empresa) s.empresa = { ...base.empresa };
     if (!Number.isFinite(Number(s.empresa.taxaEntregaPadrao))) s.empresa.taxaEntregaPadrao = 0;
     s.empresa.taxaEntregaPadrao = Math.max(0, Number(s.empresa.taxaEntregaPadrao) || 0);
+    if (!Number.isFinite(Number(s.empresa.precoOnlinePct))) s.empresa.precoOnlinePct = 0;
+    s.empresa.precoOnlinePct = Math.max(-50, Math.min(500, Number(s.empresa.precoOnlinePct) || 0));
     if (!s.aparencia || typeof s.aparencia !== 'object') s.aparencia = { ...base.aparencia };
     if (!s.perfis) s.perfis = JSON.parse(JSON.stringify(base.perfis));
     if (!Array.isArray(s.usuarios)) s.usuarios = [...base.usuarios];
@@ -1278,6 +1312,9 @@ export function criarStore() {
     if (!Array.isArray(s.estoqueMov)) s.estoqueMov = [];
     if (!Array.isArray(s.clientes)) s.clientes = [];
     if (!Number.isFinite(Number(s.proxClienteId))) s.proxClienteId = 1;
+    if (!s.clienteSessions || typeof s.clienteSessions !== 'object') s.clienteSessions = {};
+    if (!Array.isArray(s.pedidosCliente)) s.pedidosCliente = [];
+    if (!Number.isFinite(Number(s.proxPedidoClienteId))) s.proxPedidoClienteId = 1;
     if (!s.mesas || typeof s.mesas !== 'object') s.mesas = { ...base.mesas };
     const mesasOut = {};
     Object.entries(s.mesas || {}).forEach(([k, v]) => {
@@ -1347,6 +1384,9 @@ export function criarStore() {
       if (!Number.isFinite(Number(out.estoque))) out.estoque = 0;
       out.estoque = Math.max(0, parseInt(out.estoque, 10) || 0);
       out.estoqueMinimo = Math.max(0, parseInt(out.estoqueMinimo, 10) || 0);
+      out.tipo = (String(out.tipo || '').toLowerCase() === 'combo') ? 'combo' : 'produto';
+      out.somenteOnline = !!out.somenteOnline;
+      if (out.tipo === 'combo') out.somenteOnline = true;
       if (!normalizarTexto(out.cat)) out.cat = (s.categorias?.[0] || base.categorias?.[0] || 'Bebida');
       if (!normalizarTexto(out.imagem)) {
         const nome = String(out.nome || '').toLowerCase();
