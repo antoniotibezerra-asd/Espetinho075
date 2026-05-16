@@ -12,6 +12,8 @@ const store = criarStore();
 // Controle de edição na aba "Cadastros"
 let editandoId = null; // id do produto sendo editado (cadastros -> produtos)
 let editandoUsuarioId = null; // id do usuário sendo editado (parâmetros -> usuários)
+const _urlParams = new URLSearchParams(window.location.search || '');
+const _isClienteMode = (_urlParams.get('cliente') === '1');
 
 // Listas temporárias filtradas (usadas para exportação/visão)
 let fechadosFiltrados = []; // cache do modal "Pedidos fechados" com filtros aplicados
@@ -34,6 +36,7 @@ let _stateStreamTs = 0;
 // Preferências do seletor rápido de produtos no mobile (persistidas no localStorage por usuário)
 let _mobileProdCat = '';
 let _mobileProdQuery = '';
+let _mobileProdMode = 'all';
 let _activeUserIdCache = 0;
 
 // Indicadores de salvamento (feedback visual)
@@ -73,6 +76,15 @@ window.app = {
     _persistMobileProdPrefs();
     _applyMobileProdFilters();
   },
+  setMobileProdMode(m) {
+    _mobileProdMode = (m === 'fav' || m === 'recent') ? m : 'all';
+    _persistMobileProdPrefs();
+    renderComanda(store.getState());
+  },
+  toggleFav(id) {
+    try { store.toggleFavoritoProduto(id); } catch (e) { alert(e.message); }
+    renderComanda(store.getState());
+  },
   aplicarFiltroRelatorios() { renderRelatorios(store.getState()); },
   changeQty(id, delta) { _changeQty(id, delta); },
   removeItem(id)       { _removeItem(id); },
@@ -95,6 +107,8 @@ window.app = {
   ajustarEstoque(id, d){ try { store.ajustarEstoque(id, d); } catch (e) { alert(e.message); } },
   adicionarMesa(tipo)  { try { store.adicionarMesa(tipo); } catch (e) { alert(e.message); } },
   removerMesa(id)      { _removerMesa(id); },
+  qrMesa(id)           { _mostrarQrMesa(id); },
+  resetTokenMesa(id)   { _resetTokenMesa(id); },
   addPagamento()       { _addPagamento(); },
   removePagamento(n)   { try { store.removerFormaPagamento(n); } catch (e) { alert(e.message); } },
   addUsuario()         { _addUsuario(); },
@@ -112,6 +126,8 @@ window.app = {
   exportarRelatorioCategorias() { _exportarCategoriasCSV(); },
   exportarRelatorioPagamentos() { _exportarPagamentosCSV(); },
   exportarRelatorioEstoque() { _exportarEstoqueCSV(); },
+  exportarRelatorioMovEstoque() { _exportarMovEstoqueCSV(); },
+  exportarRelatorioCancelamentos() { _exportarCancelamentosCSV(); },
   imprimirComanda()    { _imprimirComanda(); },
   abrirModalUsuario()  { _abrirModalUsuario(); },
   confirmarTrocaUsuario() { _confirmarTrocaUsuario(); },
@@ -156,6 +172,7 @@ function _persistMobileProdPrefs() {
   try {
     localStorage.setItem(`mobileProdCat:${uid}`, _mobileProdCat || '');
     localStorage.setItem(`mobileProdQuery:${uid}`, _mobileProdQuery || '');
+    localStorage.setItem(`mobileProdMode:${uid}`, _mobileProdMode || 'all');
   } catch {}
 }
 
@@ -165,6 +182,8 @@ function _loadMobileProdPrefsForUser(userId) {
   try {
     _mobileProdCat = localStorage.getItem(`mobileProdCat:${uid}`) || '';
     _mobileProdQuery = localStorage.getItem(`mobileProdQuery:${uid}`) || '';
+    const m = localStorage.getItem(`mobileProdMode:${uid}`) || 'all';
+    _mobileProdMode = (m === 'fav' || m === 'recent') ? m : 'all';
   } catch {}
 }
 
@@ -182,7 +201,10 @@ function _applyMobileProdFilters() {
     const bNome = (b.getAttribute('data-nome') || '').toLowerCase();
     const okCat = !cat || bCat === cat;
     const okNome = !q || bNome.includes(q);
-    const show = okCat && okNome;
+    const isFav = (b.getAttribute('data-fav') || '') === '1';
+    const isRecent = (b.getAttribute('data-recent') || '') === '1';
+    const okMode = (_mobileProdMode === 'fav' ? isFav : (_mobileProdMode === 'recent' ? isRecent : true));
+    const show = okCat && okNome && okMode;
     b.style.display = show ? '' : 'none';
     if (show) vis += 1;
   });
@@ -203,6 +225,7 @@ function _applyMobileProdFilters() {
 // Primeira renderização
 render(store.getState());
 _supabaseAtualizarStatus(true);
+if (_isClienteMode) _bootClienteMode();
 
 function _supabaseRenderStatus() {
   const el = document.getElementById('supabase-status');
@@ -466,7 +489,7 @@ async function carregarInicial() {
   carregadoDoServidor = true;
   const token = localStorage.getItem('sessaoToken') || '';
   const ok = token ? store.restaurarSessao(token) : false;
-  if (!ok) _abrirModalUsuario(true);
+  if (!ok && !_isClienteMode) _abrirModalUsuario(true);
   _iniciarStreamEstado();
 }
 
@@ -576,6 +599,10 @@ function renderComanda(state) {
 
   const isMobile = !!(window.matchMedia && window.matchMedia('(max-width: 980px)').matches);
   const disponiveis = store.getProdutosDisponiveis();
+  const userFull = (state.usuarios || []).find(u => u.id === state.usuarioAtivo?.id) || {};
+  const favSet = new Set((Array.isArray(userFull.favoritos) ? userFull.favoritos : []).map(Number).filter(Boolean));
+  const recentes = (Array.isArray(userFull.recentes) ? userFull.recentes : []).map(Number).filter(Boolean);
+  const recentPos = new Map(recentes.map((id, idx) => [Number(id) || 0, idx]));
   const cats = Array.from(
     new Set(disponiveis.map(p => String(p?.cat || '').trim()).filter(Boolean))
   ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -586,11 +613,22 @@ function renderComanda(state) {
     .join('');
 
   const escAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-  const gridProdutosHTML = disponiveis
-    .slice()
-    .sort((a, b) => String(a?.nome || '').localeCompare(String(b?.nome || ''), 'pt-BR'))
+  const gridProdutosHTML = disponiveis.slice()
+    .sort((a, b) => {
+      if (_mobileProdMode === 'recent') {
+        const ra = recentPos.has(a?.id) ? recentPos.get(a?.id) : 1e9;
+        const rb = recentPos.has(b?.id) ? recentPos.get(b?.id) : 1e9;
+        if (ra !== rb) return ra - rb;
+      } else if (_mobileProdMode === 'fav') {
+        const fa = favSet.has(a?.id) ? 1 : 0;
+        const fb = favSet.has(b?.id) ? 1 : 0;
+        if (fa !== fb) return fb - fa;
+      }
+      return String(a?.nome || '').localeCompare(String(b?.nome || ''), 'pt-BR');
+    })
     .map(p => `
-      <button type="button" class="prod-btn" data-cat="${escAttr(p?.cat || '')}" data-nome="${escAttr(p?.nome || '')}" onclick="app.addItemById(${p.id})" title="Adicionar: ${p.nome}">
+      <button type="button" class="prod-btn" data-cat="${escAttr(p?.cat || '')}" data-nome="${escAttr(p?.nome || '')}" data-fav="${favSet.has(p.id) ? '1' : '0'}" data-recent="${recentPos.has(p.id) ? '1' : '0'}" onclick="app.addItemById(${p.id})" title="Adicionar: ${p.nome}">
+        <span class="prod-fav ${favSet.has(p.id) ? 'active' : ''}" onclick="event.stopPropagation(); app.toggleFav(${p.id})" title="${favSet.has(p.id) ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}">★</span>
         ${p.imagem
           ? `<img class="thumb" src="${p.imagem}" alt="" onerror="this.style.display='none'">`
           : `<div class="thumb placeholder" title="Sem imagem">🖼️</div>`
@@ -602,6 +640,11 @@ function renderComanda(state) {
 
   const seletorProdutoHTML = isMobile
     ? `
+      <div class="prod-modes" role="tablist" aria-label="Modo de lista">
+        <button type="button" class="chip ${_mobileProdMode === 'all' ? 'active' : ''}" onclick="app.setMobileProdMode('all')">Todos</button>
+        <button type="button" class="chip ${_mobileProdMode === 'fav' ? 'active' : ''}" onclick="app.setMobileProdMode('fav')">⭐ Fav</button>
+        <button type="button" class="chip ${_mobileProdMode === 'recent' ? 'active' : ''}" onclick="app.setMobileProdMode('recent')">🕘 Recentes</button>
+      </div>
       <div class="prod-filters" role="tablist" aria-label="Filtro de categorias">
         <button type="button" class="chip ${activeCat ? '' : 'active'}" data-cat="" onclick="app.setMobileProdCat('')">Todas</button>
         ${cats.map(c => `<button type="button" class="chip ${c === activeCat ? 'active' : ''}" data-cat="${escAttr(c)}" onclick="app.setMobileProdCat(${JSON.stringify(c)})">${c}</button>`).join('')}
@@ -1487,12 +1530,261 @@ function renderManutencaoMesas(state) {
       <div class="simple-item">
         <span>${m.tipo === 'online' ? '🌐 Pedido' : '🪑 Mesa'} ${m.id}</span>
         <div class="row" style="gap:8px">
+          ${m.tipo !== 'online'
+            ? `<button class="btn btn-sm" onclick="app.qrMesa(${m.id})">📱 QR</button>
+               <button class="btn btn-sm" onclick="app.resetTokenMesa(${m.id})" title="Resetar token do QR">♻️</button>`
+            : ''
+          }
           <span class="badge badge-${badgeClass}">${m.status}</span>
           <button class="remove-btn" onclick="app.removerMesa(${m.id})" ${m.status === 'ocupada' ? 'disabled style="opacity:0.3"' : ''}>×</button>
         </div>
       </div>
     `;
   }).join('');
+}
+
+function _mostrarQrMesa(mesaId) {
+  try {
+    const token = store.garantirTokenMesa(mesaId);
+    const base = `${window.location.origin}${window.location.pathname}`;
+    const link = `${base}?cliente=1&mesa=${Number(mesaId) || 0}&token=${encodeURIComponent(token)}`;
+    const qr = `https://quickchart.io/qr?text=${encodeURIComponent(link)}&size=320&margin=1`;
+    _verImagem(qr, `Mesa ${mesaId} · QR Code`);
+    setTimeout(() => {
+      try { navigator.clipboard?.writeText?.(link); } catch {}
+      try { window.prompt('Link do QR (copie e cole):', link); } catch {}
+    }, 50);
+  } catch (e) {
+    alert(e.message || String(e));
+  }
+}
+
+function _resetTokenMesa(mesaId) {
+  if (!confirm(`Resetar o token do QR da Mesa ${mesaId}?\n\nQualquer QR antigo vai parar de funcionar.`)) return;
+  try {
+    store.resetarTokenMesa(mesaId);
+    _mostrarQrMesa(mesaId);
+  } catch (e) {
+    alert(e.message || String(e));
+  }
+}
+
+function _bootClienteMode() {
+  document.body.classList.add('cliente-mode');
+  const header = document.querySelector('header.topbar');
+  const main = document.querySelector('main.main');
+  if (header) header.style.display = 'none';
+  if (main) main.style.display = 'none';
+
+  const root = document.createElement('div');
+  root.id = 'cliente-root';
+  root.className = 'cliente-root';
+  document.body.appendChild(root);
+
+  const mesaId = Number(_urlParams.get('mesa')) || 0;
+  const token = String(_urlParams.get('token') || '').trim();
+  const tituloMesa = mesaId ? `Mesa ${mesaId}` : 'Pedido Online';
+
+  const cart = new Map();
+  let menu = { empresa: null, categorias: [], produtos: [] };
+  let cat = '';
+  let q = '';
+  let status = '';
+
+  function renderCliente() {
+    const empresaNome = (menu?.empresa?.nome || 'Espetinho 075').trim();
+    const cats = Array.isArray(menu?.categorias) ? menu.categorias.filter(Boolean) : [];
+    const produtos = Array.isArray(menu?.produtos) ? menu.produtos : [];
+
+    const qNorm = String(q || '').trim().toLowerCase();
+    const itensCart = Array.from(cart.entries()).map(([id, qty]) => ({ id: Number(id) || 0, qty: Number(qty) || 0 })).filter(x => x.id && x.qty > 0);
+    const cartById = new Map(itensCart.map(x => [x.id, x.qty]));
+
+    const visiveis = produtos
+      .filter(p => (cat ? p.cat === cat : true))
+      .filter(p => (qNorm ? String(p.nome || '').toLowerCase().includes(qNorm) : true))
+      .slice()
+      .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
+
+    const cartDetalhes = itensCart
+      .map(it => {
+        const p = produtos.find(x => Number(x.id) === Number(it.id));
+        if (!p) return null;
+        return { ...it, nome: p.nome, preco: Number(p.preco) || 0 };
+      })
+      .filter(Boolean);
+    const total = cartDetalhes.reduce((soma, it) => soma + (Number(it.preco) || 0) * (Number(it.qty) || 0), 0);
+
+    root.innerHTML = `
+      <div class="cliente-top">
+        <div class="cliente-title">${empresaNome}</div>
+        <div class="cliente-sub">${tituloMesa}</div>
+      </div>
+
+      <div class="card cliente-card">
+        <div class="prod-search"><input id="cliente-busca" type="search" placeholder="Buscar..." value="${String(q || '').replace(/"/g, '&quot;')}" /></div>
+        <div class="prod-filters" id="cliente-cats">
+          <button class="chip ${!cat ? 'active' : ''}" data-cat="">Todos</button>
+          ${cats.map(c => `<button class="chip ${c === cat ? 'active' : ''}" data-cat="${String(c).replace(/"/g, '&quot;')}">${c}</button>`).join('')}
+        </div>
+        <div class="prod-picker" id="cliente-prods">
+          ${visiveis.map(p => {
+            const inCart = cartById.get(Number(p.id)) || 0;
+            const dis = !p.disponivel;
+            return `
+              <button class="prod-btn" data-id="${p.id}" ${dis ? 'disabled style="opacity:0.4"' : ''}>
+                ${p.imagem ? `<img class="thumb" src="${p.imagem}" alt="" onerror="this.style.display='none'">` : `<div class="thumb placeholder">🖼️</div>`}
+                <div class="prod-nome">${p.nome}</div>
+                <div class="prod-preco">${formatBRL(Number(p.preco) || 0)}${inCart ? ` · ${inCart}x` : ''}${dis ? ' · Indisponível' : ''}</div>
+              </button>
+            `;
+          }).join('')}
+        </div>
+        <div id="cliente-prods-empty" class="empty-msg" style="display:${visiveis.length ? 'none' : 'block'}">Nenhum item encontrado.</div>
+      </div>
+
+      <div class="card cliente-card" style="margin-top:12px">
+        <div class="row" style="justify-content:space-between; margin-bottom:10px">
+          <div style="font-weight:700">Seu pedido</div>
+          <div class="badge badge-blue">${formatBRL(total)}</div>
+        </div>
+        <div id="cliente-cart">
+          ${cartDetalhes.length
+            ? cartDetalhes.map(it => `
+                <div class="item-row">
+                  <div class="item-info">
+                    <div class="item-nome">${it.nome}</div>
+                    <div class="item-preco">${formatBRL(it.preco)} · ${it.qty}x</div>
+                  </div>
+                  <div class="row" style="gap:6px">
+                    <button class="qty-btn" data-act="dec" data-id="${it.id}">−</button>
+                    <button class="qty-btn" data-act="inc" data-id="${it.id}">+</button>
+                    <button class="remove-btn" data-act="rm" data-id="${it.id}">×</button>
+                  </div>
+                </div>
+              `).join('')
+            : `<p class="empty-msg" style="padding:10px 0">Toque nos itens para adicionar.</p>`
+          }
+        </div>
+        <div class="row" style="gap:8px; margin-top:10px">
+          <button class="btn" id="cliente-limpar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Limpar</button>
+          <button class="btn btn-primary" id="cliente-enviar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Enviar pedido</button>
+        </div>
+        <div class="empty-msg" id="cliente-status" style="padding:10px 0; display:${status ? 'block' : 'none'}">${status || ''}</div>
+      </div>
+    `;
+
+    const busca = root.querySelector('#cliente-busca');
+    if (busca) {
+      busca.addEventListener('input', (e) => {
+        q = String(e.target.value || '');
+        renderCliente();
+      });
+    }
+
+    const catsEl = root.querySelector('#cliente-cats');
+    if (catsEl) {
+      catsEl.addEventListener('click', (e) => {
+        const b = e.target.closest('.chip');
+        if (!b) return;
+        cat = String(b.getAttribute('data-cat') || '');
+        renderCliente();
+      });
+    }
+
+    const prodsEl = root.querySelector('#cliente-prods');
+    if (prodsEl) {
+      prodsEl.addEventListener('click', (e) => {
+        const b = e.target.closest('.prod-btn');
+        if (!b) return;
+        const id = Number(b.getAttribute('data-id')) || 0;
+        if (!id) return;
+        const prev = Number(cart.get(id)) || 0;
+        cart.set(id, prev + 1);
+        status = '';
+        renderCliente();
+      });
+    }
+
+    const cartEl = root.querySelector('#cliente-cart');
+    if (cartEl) {
+      cartEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const act = btn.getAttribute('data-act') || '';
+        const id = Number(btn.getAttribute('data-id')) || 0;
+        if (!id) return;
+        const prev = Number(cart.get(id)) || 0;
+        if (act === 'inc') cart.set(id, prev + 1);
+        if (act === 'dec') {
+          const next = Math.max(0, prev - 1);
+          if (next <= 0) cart.delete(id);
+          else cart.set(id, next);
+        }
+        if (act === 'rm') cart.delete(id);
+        status = '';
+        renderCliente();
+      });
+    }
+
+    const btnLimpar = root.querySelector('#cliente-limpar');
+    if (btnLimpar) {
+      btnLimpar.addEventListener('click', () => {
+        cart.clear();
+        status = '';
+        renderCliente();
+      });
+    }
+
+    const btnEnviar = root.querySelector('#cliente-enviar');
+    if (btnEnviar) {
+      btnEnviar.addEventListener('click', async () => {
+        const payloadItens = Array.from(cart.entries()).map(([id, qty]) => ({ produtoId: Number(id) || 0, qty: Number(qty) || 0 })).filter(x => x.produtoId && x.qty > 0);
+        if (!payloadItens.length) return;
+        if (mesaId > 0 && !token) {
+          status = 'Link inválido. Leia o QR Code novamente.';
+          renderCliente();
+          return;
+        }
+        status = 'Enviando...';
+        renderCliente();
+        try {
+          const r = await fetch('/api/client/order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mesaId: mesaId || 0, token: token || '', itens: payloadItens }),
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok || !j?.ok) {
+            status = String(j?.error || 'Falha ao enviar pedido.');
+            renderCliente();
+            return;
+          }
+          cart.clear();
+          const newMesaId = Number(j?.mesaId) || 0;
+          status = newMesaId && !mesaId
+            ? `Pedido enviado! Número: ${newMesaId}.`
+            : 'Pedido enviado! Aguarde o atendimento.';
+          renderCliente();
+        } catch (e) {
+          status = 'Sem conexão. Tente novamente.';
+          renderCliente();
+        }
+      });
+    }
+  }
+
+  fetch('/api/client/menu')
+    .then(r => r.json())
+    .then(j => {
+      if (!j?.ok) throw new Error(j?.error || 'Falha ao carregar cardápio.');
+      menu = j?.data || { empresa: null, categorias: [], produtos: [] };
+      renderCliente();
+    })
+    .catch(() => {
+      status = 'Falha ao carregar cardápio.';
+      renderCliente();
+    });
 }
 
 // ─── Caixa ───────────────────────────────────────────────────────────────────
@@ -2300,8 +2592,9 @@ function renderRelatorios(state) {
   const totalVendido = fechamentos.reduce((s, h) => s + (Number(h.total) || 0), 0);
   const ticketMedio = fechamentos.length ? (totalVendido / fechamentos.length) : 0;
   const fmtBRL = (v) => `R$ ${Number(v || 0).toFixed(2).replace('.', ',')}`;
+  const diff = totalVendido - totalRecebido;
 
-  resumoEl.textContent = `Período: ${filtros.de} → ${filtros.ate} · Pagamentos: ${pagamentos} · Fechamentos: ${fechamentos.length} · Total vendido: ${fmtBRL(totalVendido)} · Total recebido: ${fmtBRL(totalRecebido)} · Ticket médio: ${fmtBRL(ticketMedio)}`;
+  resumoEl.textContent = `Período: ${filtros.de} → ${filtros.ate} · Pagamentos: ${pagamentos} · Fechamentos: ${fechamentos.length} · Total vendido: ${fmtBRL(totalVendido)} · Total recebido: ${fmtBRL(totalRecebido)} · Diferença: ${fmtBRL(diff)} · Ticket médio: ${fmtBRL(ticketMedio)}`;
   _renderDashboardRelatorios(state, itens, fechamentos);
 }
 
@@ -2555,6 +2848,41 @@ function _exportarEstoqueCSV() {
   });
 
   _downloadCSV(csv, `relatorio_estoque_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`);
+}
+
+function _exportarMovEstoqueCSV() {
+  const state = store.getState();
+  const perfil = store.getPerfilAcesso(state.usuarioAtivo?.papel);
+  if (!perfil?.tabs?.relatorios || !perfil?.acoes?.verRelatorios) return alert('Sem permissão.');
+  const f = _getRelatorioFiltros(state);
+  const itens = (state.estoqueMov || [])
+    .filter(m => (typeof f.tsDe === 'number' ? (Number(m.ts) || 0) >= f.tsDe : true))
+    .filter(m => (typeof f.tsAte === 'number' ? (Number(m.ts) || 0) <= f.tsAte : true));
+  if (itens.length === 0) return alert('Nenhuma movimentação encontrada para o período.');
+
+  let csv = 'Data;Hora;Produto;Categoria;Delta;Antes;Depois;Motivo;Origem;Mesa;Usuario;Papel\n';
+  itens.forEach(m => {
+    csv += `${m.data || ''};${m.hora || ''};${String(m.produtoNome || '').replace(/;/g, ',')};${String(m.categoria || '').replace(/;/g, ',')};${Number(m.delta || 0)};${Number.isFinite(Number(m.before)) ? Number(m.before) : ''};${Number.isFinite(Number(m.after)) ? Number(m.after) : ''};${String(m.motivo || '').replace(/;/g, ',')};${String(m.origem || '').replace(/;/g, ',')};${m.mesaId || ''};${String(m.userNome || '').replace(/;/g, ',')};${String(m.userPapel || '').replace(/;/g, ',')}\n`;
+  });
+  _downloadCSV(csv, `relatorio_mov_estoque_${new Date().toISOString().slice(0, 10)}.csv`);
+}
+
+function _exportarCancelamentosCSV() {
+  const state = store.getState();
+  const perfil = store.getPerfilAcesso(state.usuarioAtivo?.papel);
+  if (!perfil?.tabs?.relatorios || !perfil?.acoes?.verRelatorios) return alert('Sem permissão.');
+  const f = _getRelatorioFiltros(state);
+  const itens = (state.estoqueMov || [])
+    .filter(m => String(m.motivo || '') === 'cancelamento')
+    .filter(m => (typeof f.tsDe === 'number' ? (Number(m.ts) || 0) >= f.tsDe : true))
+    .filter(m => (typeof f.tsAte === 'number' ? (Number(m.ts) || 0) <= f.tsAte : true));
+  if (itens.length === 0) return alert('Nenhum cancelamento encontrado para o período.');
+
+  let csv = 'Data;Hora;Mesa;Produto;Categoria;Quantidade;Usuario;Papel\n';
+  itens.forEach(m => {
+    csv += `${m.data || ''};${m.hora || ''};${m.mesaId || ''};${String(m.produtoNome || '').replace(/;/g, ',')};${String(m.categoria || '').replace(/;/g, ',')};${Math.abs(Number(m.delta || 0))};${String(m.userNome || '').replace(/;/g, ',')};${String(m.userPapel || '').replace(/;/g, ',')}\n`;
+  });
+  _downloadCSV(csv, `relatorio_cancelamentos_${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
 function _downloadCSV(csv, filename) {

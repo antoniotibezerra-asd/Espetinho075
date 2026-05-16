@@ -30,6 +30,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 let createSupabaseClient = null;
 try {
@@ -44,10 +45,12 @@ const WEB_DIR = path.join(__dirname, 'web');
 const CORE_DIR = path.join(__dirname, 'core');
 const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const UPLOAD_DIR = path.join(WEB_DIR, 'assets', 'uploads');
 const SUPABASE_STATE_TABLE = String(process.env.SUPABASE_STATE_TABLE || 'app_state').trim() || 'app_state';
 const APP_INSTANCE_ID = String(process.env.APP_INSTANCE_ID || 'default').trim() || 'default';
 const SUPABASE_STORAGE_BUCKET = String(process.env.SUPABASE_STORAGE_BUCKET || 'uploads').trim() || 'uploads';
+let _lastBackupKey = '';
 
 function normalizeSupabaseUrl(input) {
   const raw = String(input || '').trim();
@@ -215,6 +218,17 @@ function uniqStrings(arr) {
 function parseNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function randomToken(bytesLen = 16) {
+  const len = Math.max(8, Number(bytesLen) || 16);
+  try {
+    return crypto.randomBytes(len).toString('hex');
+  } catch {
+    let out = '';
+    for (let i = 0; i < len; i++) out += Math.floor(Math.random() * 256).toString(16).padStart(2, '0');
+    return out;
+  }
 }
 
 async function supabaseSelectSingleRow(sb, table, columns) {
@@ -424,6 +438,34 @@ function ensureDirSync(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
+async function maybeAutoBackupState(sb, state) {
+  if (!parseBool(process.env.APP_AUTO_BACKUP, true)) return;
+  const rev = Number.isFinite(Number(state?.sync?.rev)) ? Number(state.sync.rev) : 0;
+  const ts = Number.isFinite(Number(state?.sync?.updatedAt)) ? Number(state.sync.updatedAt) : Date.now();
+  const day = new Date(ts).toISOString().slice(0, 10);
+  const key = `${APP_INSTANCE_ID}:${day}`;
+  if (_lastBackupKey === key) return;
+  _lastBackupKey = key;
+
+  const filename = `state_${APP_INSTANCE_ID}_${day}_rev${rev}.json`;
+  const payload = JSON.stringify({ meta: { appInstanceId: APP_INSTANCE_ID, day, rev, ts }, state: state ?? null });
+
+  try {
+    ensureDirSync(BACKUP_DIR);
+    fs.writeFileSync(path.join(BACKUP_DIR, filename), payload, 'utf8');
+  } catch {}
+
+  if (sb && parseBool(process.env.SUPABASE_USE_STORAGE, true)) {
+    try {
+      const objectPath = `backups/${APP_INSTANCE_ID}/${filename}`;
+      await sb.storage.from(SUPABASE_STORAGE_BUCKET).upload(objectPath, Buffer.from(payload, 'utf8'), {
+        contentType: 'application/json',
+        upsert: true,
+      });
+    } catch {}
+  }
+}
+
 function sendJson(res, status, obj) {
   if (res.writableEnded || res.headersSent) return;
   const payload = JSON.stringify(obj);
@@ -455,6 +497,173 @@ function safePathJoin(baseDir, urlPath) {
   const full = path.join(baseDir, safe);
   if (!full.startsWith(baseDir)) return null;
   return full;
+}
+
+function readFileState() {
+  ensureDirSync(DATA_DIR);
+  if (!fs.existsSync(STATE_FILE)) return { state: null, server: { rev: 0, updatedAt: 0 } };
+  try {
+    const raw = fs.readFileSync(STATE_FILE, 'utf8');
+    const state = raw ? JSON.parse(raw) : null;
+    const rev = Number.isFinite(Number(state?.sync?.rev)) ? Number(state.sync.rev) : 0;
+    const updatedAt = Number.isFinite(Number(state?.sync?.updatedAt)) ? Number(state.sync.updatedAt) : 0;
+    return { state, server: { rev, updatedAt } };
+  } catch {
+    return { state: null, server: { rev: 0, updatedAt: 0 } };
+  }
+}
+
+function writeFileState({ state, ifRev, force }) {
+  ensureDirSync(DATA_DIR);
+  const current = readFileState();
+  const currentRev = Number(current?.server?.rev) || 0;
+  const currentUpdatedAt = Number(current?.server?.updatedAt) || 0;
+  if (!force && Number.isFinite(Number(ifRev)) && current?.state && currentRev !== Number(ifRev)) {
+    return { ok: false, conflict: true, server: { rev: currentRev, updatedAt: currentUpdatedAt } };
+  }
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state ?? null), 'utf8');
+  const rev = Number.isFinite(Number(state?.sync?.rev)) ? Number(state.sync.rev) : 0;
+  const updatedAt = Number.isFinite(Number(state?.sync?.updatedAt)) ? Number(state.sync.updatedAt) : Date.now();
+  return { ok: true, server: { rev, updatedAt } };
+}
+
+async function loadStateAny() {
+  const sb = getSupabaseClientOrNull();
+  if (sb) {
+    try {
+      const out = await supabaseGetAppState(sb);
+      return { backend: 'supabase', sb, ...out };
+    } catch (err) {
+      if (!isSupabaseMissingRelation(err)) throw err;
+      const out = readFileState();
+      return { backend: 'file', sb: null, ...out };
+    }
+  }
+  const out = readFileState();
+  return { backend: 'file', sb: null, ...out };
+}
+
+async function saveStateAny(ctx, { state, ifRev, force }) {
+  if (ctx?.backend === 'supabase' && ctx?.sb) {
+    const out = await supabaseSaveAppState(ctx.sb, { state, ifRev, force });
+    return out;
+  }
+  return writeFileState({ state, ifRev, force });
+}
+
+function setorPorCategoria(cat) {
+  const c = String(cat || '');
+  if (c === 'Petisco') return 'churrasco';
+  if (c === 'Prato' || c === 'Sobremesa') return 'cozinha';
+  return 'bar';
+}
+
+function applyClientOrderToState(state, { mesaId, itens, origemLabel }) {
+  const s = state && typeof state === 'object' ? state : null;
+  if (!s) throw new Error('Estado não inicializado.');
+  if (!s.mesas || typeof s.mesas !== 'object') throw new Error('Estado inválido (mesas).');
+  if (!Array.isArray(s.produtos)) throw new Error('Estado inválido (produtos).');
+  if (!Array.isArray(s.filaProducao)) s.filaProducao = [];
+  if (!Array.isArray(s.estoqueMov)) s.estoqueMov = [];
+  if (!Array.isArray(s.auditoria)) s.auditoria = [];
+  if (!s.sync || typeof s.sync !== 'object') s.sync = { rev: 0, updatedAt: 0, updatedBy: null };
+
+  const idMesa = Number(mesaId) || 0;
+  const mesa = s.mesas[idMesa];
+  if (!mesa) throw new Error('Mesa não encontrada.');
+
+  const itensNorm = (Array.isArray(itens) ? itens : [])
+    .map(it => ({ produtoId: Number(it?.produtoId) || 0, qty: Number(it?.qty) || 0 }))
+    .filter(it => it.produtoId > 0 && it.qty > 0)
+    .map(it => ({ ...it, qty: Math.min(50, Math.floor(it.qty)) }))
+    .filter(it => it.qty > 0);
+  if (!itensNorm.length) throw new Error('Itens inválidos.');
+
+  const prodById = new Map((s.produtos || []).map(p => [Number(p?.id) || 0, p]).filter(([k]) => !!k));
+  const erros = [];
+  for (const it of itensNorm) {
+    const p = prodById.get(it.produtoId);
+    if (!p) { erros.push(`Produto ${it.produtoId} não encontrado.`); continue; }
+    if (!s.permitirVendaSemEstoque && Number(p.estoque) < it.qty) erros.push(`"${p.nome}" sem estoque suficiente.`);
+  }
+  if (erros.length) throw new Error(erros.join(' '));
+
+  if (mesa.status === 'livre') mesa.status = 'ocupada';
+  if (!Array.isArray(mesa.itens)) mesa.itens = [];
+
+  const ts = Date.now();
+  const prevRev = Number.isFinite(Number(s.sync?.rev)) ? Number(s.sync.rev) : 0;
+  s.sync = {
+    rev: prevRev + 1,
+    updatedAt: ts,
+    updatedBy: { id: null, nome: 'Cliente', papel: 'cliente' },
+  };
+  s.auditoria.unshift({
+    ts,
+    data: new Date(ts).toISOString().slice(0, 10),
+    hora: new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    userId: null,
+    userNome: 'Cliente',
+    userPapel: 'cliente',
+    tipo: 'client.order',
+    meta: { mesaId: idMesa, itens: itensNorm.map(x => ({ ...x })), origem: origemLabel || '' },
+  });
+  if (s.auditoria.length > 1000) s.auditoria.length = 1000;
+
+  for (const it of itensNorm) {
+    const p = prodById.get(it.produtoId);
+    if (!p) continue;
+    const itemMesa = (mesa.itens || []).find(x => Number(x?.id) === Number(p.id));
+    if (itemMesa) itemMesa.qty = (Number(itemMesa.qty) || 0) + it.qty;
+    else mesa.itens.push({ id: p.id, nome: p.nome, preco: p.preco, qty: it.qty });
+    p.estoque = Number(p.estoque) - it.qty;
+
+    const movTs = ts;
+    const after = Number.isFinite(Number(p?.estoque)) ? Number(p.estoque) : null;
+    const before = Number.isFinite(Number(after)) ? after + it.qty : null;
+    s.estoqueMov.unshift({
+      ts: movTs,
+      data: new Date(movTs).toISOString().slice(0, 10),
+      hora: new Date(movTs).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      userId: null,
+      userNome: 'Cliente',
+      userPapel: 'cliente',
+      produtoId: Number(p.id) || null,
+      produtoNome: p.nome || null,
+      categoria: p.cat || null,
+      delta: -Math.abs(Number(it.qty) || 0),
+      before,
+      after,
+      motivo: 'venda',
+      origem: 'cliente',
+      mesaId: idMesa,
+    });
+
+    s.filaProducao.push({
+      id: Date.now() + Math.random(),
+      mesaId: idMesa,
+      produtoId: p.id,
+      nome: p.nome,
+      qty: it.qty,
+      setor: setorPorCategoria(p.cat),
+      status: 'pendente',
+      hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      origem: origemLabel || 'Online',
+    });
+  }
+
+  if (s.estoqueMov.length > 5000) s.estoqueMov.length = 5000;
+  return s;
+}
+
+function criarMesaOnlineNoEstado(state) {
+  const s = state && typeof state === 'object' ? state : null;
+  if (!s) throw new Error('Estado não inicializado.');
+  if (!s.mesas || typeof s.mesas !== 'object') s.mesas = {};
+  const ids = Object.keys(s.mesas).map(Number).filter(n => Number.isFinite(n) && n > 0);
+  const novoId = ids.length ? Math.max(...ids) + 1 : 1;
+  s.mesas[novoId] = { id: novoId, itens: [], status: 'livre', tipo: 'online', credito: 0, aplicarTaxa: false, token: randomToken(12) };
+  return { mesaId: novoId, token: String(s.mesas[novoId].token || '') };
 }
 
 const server = http.createServer((req, res) => {
@@ -522,6 +731,91 @@ const server = http.createServer((req, res) => {
     return sendJson(res, 405, { error: 'Método não permitido.' });
   }
 
+  if (url === '/api/client/menu') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Método não permitido.' });
+    loadStateAny()
+      .then(ctx => {
+        const st = ctx?.state || null;
+        if (!st) return sendJson(res, 200, { ok: true, data: { empresa: null, categorias: [], produtos: [] } });
+        const permitir = !!st.permitirVendaSemEstoque;
+        const produtos = (Array.isArray(st.produtos) ? st.produtos : [])
+          .map(p => ({
+            id: Number(p?.id) || 0,
+            nome: String(p?.nome || ''),
+            cat: String(p?.cat || ''),
+            subcat: String(p?.subcat || ''),
+            preco: Number(p?.preco) || 0,
+            imagem: String(p?.imagem || ''),
+            disponivel: permitir ? true : (Number(p?.estoque) > 0),
+          }))
+          .filter(p => p.id > 0 && p.nome);
+        const categorias = Array.isArray(st.categorias) ? st.categorias.map(x => String(x || '')).filter(Boolean) : [];
+        const empresa = st.empresa ? {
+          nome: String(st.empresa?.nome || ''),
+          telefone: String(st.empresa?.telefone || ''),
+          endereco: String(st.empresa?.endereco || ''),
+          logoUrl: String(st.empresa?.logoUrl || ''),
+        } : null;
+        return sendJson(res, 200, { ok: true, data: { empresa, categorias, produtos } });
+      })
+      .catch(err => sendJson(res, 500, { error: err.message || String(err) }));
+    return;
+  }
+
+  if (url === '/api/client/order') {
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Método não permitido.' });
+    readJsonBody(req)
+      .then(async body => {
+        let mesaId = Number(body?.mesaId) || 0;
+        const token = String(body?.token || '').trim();
+        const itens = Array.isArray(body?.itens) ? body.itens : [];
+
+        const tries = 3;
+        for (let attempt = 0; attempt < tries; attempt++) {
+          const ctx = await loadStateAny();
+          const st = ctx?.state || null;
+          if (!st) return sendJson(res, 400, { error: 'Sistema ainda não foi inicializado.' });
+          let outOnline = null;
+          if (mesaId > 0) {
+            const mesa = st?.mesas?.[mesaId];
+            if (!mesa) return sendJson(res, 404, { error: 'Mesa não encontrada.' });
+            const mesaToken = String(mesa?.token || '').trim();
+            if (!mesaToken) return sendJson(res, 400, { error: 'Mesa sem token. Gere o QR Code novamente.' });
+            if (!token || token !== mesaToken) return sendJson(res, 401, { error: 'Token inválido.' });
+          } else {
+            try {
+              outOnline = criarMesaOnlineNoEstado(st);
+              mesaId = outOnline.mesaId;
+            } catch (e) {
+              return sendJson(res, 400, { error: e.message || String(e) });
+            }
+          }
+
+          let nextState;
+          try {
+            nextState = applyClientOrderToState(st, { mesaId, itens, origemLabel: mesaId > 0 && !outOnline ? 'Mesa' : 'Online' });
+          } catch (e) {
+            return sendJson(res, 400, { error: e.message || String(e) });
+          }
+
+          try {
+            const out = await saveStateAny(ctx, { state: nextState, ifRev: ctx?.server?.rev, force: false });
+            if (out?.conflict) continue;
+            const serverInfo = out?.server || { rev: Number(nextState?.sync?.rev) || 0, updatedAt: Number(nextState?.sync?.updatedAt) || Date.now() };
+            _sseLast = { rev: Number(serverInfo?.rev) || 0, updatedAt: Number(serverInfo?.updatedAt) || 0 };
+            _broadcastServerInfo(_sseLast);
+            maybeAutoBackupState(ctx?.sb || null, nextState);
+            return sendJson(res, 200, { ok: true, server: serverInfo, mesaId, token: outOnline?.token || null });
+          } catch (err) {
+            return sendJson(res, 500, { error: err.message || String(err) });
+          }
+        }
+        return sendJson(res, 409, { error: 'CONFLICT' });
+      })
+      .catch(err => sendJson(res, 400, { error: err.message || String(err) }));
+    return;
+  }
+
   if (url.startsWith('/api/state')) {
     if (req.method === 'GET') {
       const sb = getSupabaseClientOrNull();
@@ -536,30 +830,13 @@ const server = http.createServer((req, res) => {
           .then(v => {
             if (v !== '__FALLBACK__') return;
             ensureDirSync(DATA_DIR);
-            if (!fs.existsSync(STATE_FILE)) return sendJson(res, 200, { state: null, server: { rev: 0, updatedAt: 0 } });
-            try {
-              const raw = fs.readFileSync(STATE_FILE, 'utf8');
-              const state = raw ? JSON.parse(raw) : null;
-              const rev = Number.isFinite(Number(state?.sync?.rev)) ? Number(state.sync.rev) : 0;
-              const updatedAt = Number.isFinite(Number(state?.sync?.updatedAt)) ? Number(state.sync.updatedAt) : 0;
-              return sendJson(res, 200, { state, server: { rev, updatedAt } });
-            } catch (e) {
-              return sendJson(res, 500, { error: 'Falha ao ler estado.' });
-            }
+                const out = readFileState();
+                return sendJson(res, 200, out);
           });
         return;
       }
-      ensureDirSync(DATA_DIR);
-      if (!fs.existsSync(STATE_FILE)) return sendJson(res, 200, { state: null, server: { rev: 0, updatedAt: 0 } });
-      try {
-        const raw = fs.readFileSync(STATE_FILE, 'utf8');
-        const state = raw ? JSON.parse(raw) : null;
-        const rev = Number.isFinite(Number(state?.sync?.rev)) ? Number(state.sync.rev) : 0;
-        const updatedAt = Number.isFinite(Number(state?.sync?.updatedAt)) ? Number(state.sync.updatedAt) : 0;
-        return sendJson(res, 200, { state, server: { rev, updatedAt } });
-      } catch (e) {
-        return sendJson(res, 500, { error: 'Falha ao ler estado.' });
-      }
+      const out = readFileState();
+      return sendJson(res, 200, out);
     }
 
     if (req.method === 'POST') {
@@ -576,6 +853,7 @@ const server = http.createServer((req, res) => {
                 if (out.conflict) return sendJson(res, 409, { error: 'CONFLICT', server: out.server });
                 _sseLast = { rev: Number(out?.server?.rev) || 0, updatedAt: Number(out?.server?.updatedAt) || 0 };
                 _broadcastServerInfo(_sseLast);
+                maybeAutoBackupState(sb, state);
                 return sendJson(res, 200, { ok: true, server: out.server });
               })
               .catch(err => {
@@ -586,59 +864,22 @@ const server = http.createServer((req, res) => {
               .then(v => {
                 if (v !== '__FALLBACK__') return;
                 ensureDirSync(DATA_DIR);
-                let current = null;
-                let currentRev = 0;
-                let currentUpdatedAt = 0;
-                if (fs.existsSync(STATE_FILE)) {
-                  try {
-                    const raw = fs.readFileSync(STATE_FILE, 'utf8');
-                    current = raw ? JSON.parse(raw) : null;
-                    currentRev = Number.isFinite(Number(current?.sync?.rev)) ? Number(current.sync.rev) : 0;
-                    currentUpdatedAt = Number.isFinite(Number(current?.sync?.updatedAt)) ? Number(current.sync.updatedAt) : 0;
-                  } catch (e) {
-                    current = null;
-                  }
-                }
-
-                if (!force && Number.isFinite(Number(ifRev)) && current && currentRev !== Number(ifRev)) {
-                  return sendJson(res, 409, { error: 'CONFLICT', server: { rev: currentRev, updatedAt: currentUpdatedAt } });
-                }
-
-                fs.writeFileSync(STATE_FILE, JSON.stringify(state ?? null), 'utf8');
-                const rev = Number.isFinite(Number(state?.sync?.rev)) ? Number(state.sync.rev) : 0;
-                const updatedAt = Number.isFinite(Number(state?.sync?.updatedAt)) ? Number(state.sync.updatedAt) : Date.now();
-                _sseLast = { rev, updatedAt };
+                const out = writeFileState({ state, ifRev, force });
+                if (out?.conflict) return sendJson(res, 409, { error: 'CONFLICT', server: out.server });
+                _sseLast = { rev: Number(out?.server?.rev) || 0, updatedAt: Number(out?.server?.updatedAt) || 0 };
                 _broadcastServerInfo(_sseLast);
-                return sendJson(res, 200, { ok: true, server: { rev, updatedAt } });
+                maybeAutoBackupState(null, state);
+                return sendJson(res, 200, { ok: true, server: out.server });
               });
             return;
           }
 
-          ensureDirSync(DATA_DIR);
-          let current = null;
-          let currentRev = 0;
-          let currentUpdatedAt = 0;
-          if (fs.existsSync(STATE_FILE)) {
-            try {
-              const raw = fs.readFileSync(STATE_FILE, 'utf8');
-              current = raw ? JSON.parse(raw) : null;
-              currentRev = Number.isFinite(Number(current?.sync?.rev)) ? Number(current.sync.rev) : 0;
-              currentUpdatedAt = Number.isFinite(Number(current?.sync?.updatedAt)) ? Number(current.sync.updatedAt) : 0;
-            } catch (e) {
-              current = null;
-            }
-          }
-
-          if (!force && Number.isFinite(Number(ifRev)) && current && currentRev !== Number(ifRev)) {
-            return sendJson(res, 409, { error: 'CONFLICT', server: { rev: currentRev, updatedAt: currentUpdatedAt } });
-          }
-
-          fs.writeFileSync(STATE_FILE, JSON.stringify(state ?? null), 'utf8');
-          const rev = Number.isFinite(Number(state?.sync?.rev)) ? Number(state.sync.rev) : 0;
-          const updatedAt = Number.isFinite(Number(state?.sync?.updatedAt)) ? Number(state.sync.updatedAt) : Date.now();
-          _sseLast = { rev, updatedAt };
+          const out = writeFileState({ state, ifRev, force });
+          if (out?.conflict) return sendJson(res, 409, { error: 'CONFLICT', server: out.server });
+          _sseLast = { rev: Number(out?.server?.rev) || 0, updatedAt: Number(out?.server?.updatedAt) || 0 };
           _broadcastServerInfo(_sseLast);
-          sendJson(res, 200, { ok: true, server: { rev, updatedAt } });
+          maybeAutoBackupState(null, state);
+          sendJson(res, 200, { ok: true, server: out.server });
         })
         .catch(err => sendJson(res, 400, { error: err.message }));
       return;

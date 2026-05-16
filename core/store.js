@@ -13,7 +13,7 @@ const PAPEIS = ['gerente', 'garcom', 'cozinha', 'churrasqueiro', 'cliente'];
 function criarEstadoInicial() {
   const mesas = {};
   for (let i = 1; i <= MESAS_INICIAIS; i++) {
-    mesas[i] = { id: i, itens: [], status: 'livre', tipo: 'presencial', credito: 0, aplicarTaxa: false };
+    mesas[i] = { id: i, itens: [], status: 'livre', tipo: 'presencial', credito: 0, aplicarTaxa: false, token: '' };
   }
   return {
     /**
@@ -82,6 +82,7 @@ function criarEstadoInicial() {
      * - valorPago e saldoRestante permitem pagamentos parciais.
      */
     historico: [],          // { mesa, total, subtotal, taxaServico, formaPagamento, hora, itens[] }
+    estoqueMov: [],
     /**
      * filaProducao: pedidos a serem preparados por setor (bar/cozinha/churrasco)
      */
@@ -256,6 +257,7 @@ export function criarStore() {
       subcategorias: [...state.subcategorias],
       formasPagamento: [...state.formasPagamento],
       historico: [...state.historico],
+      estoqueMov: [...(state.estoqueMov || [])],
       filaProducao: [...state.filaProducao],
       usuarios: state.usuarios.map(u => ({ ...u })),
       perfis: JSON.parse(JSON.stringify(state.perfis)),
@@ -334,6 +336,64 @@ export function criarStore() {
       meta,
     });
     if (state.auditoria.length > 1000) state.auditoria.length = 1000;
+  }
+
+  function _registrarMovEstoque({ produtoId, delta, motivo, origem, mesaId = null }) {
+    const prod = getProduto(produtoId);
+    const ts = Date.now();
+    const u = state.usuarioAtivo;
+    if (!Array.isArray(state.estoqueMov)) state.estoqueMov = [];
+    const d = Number(delta) || 0;
+    const after = Number.isFinite(Number(prod?.estoque)) ? Number(prod.estoque) : null;
+    const before = Number.isFinite(Number(after)) ? after - d : null;
+    state.estoqueMov.unshift({
+      ts,
+      data: dataISO(ts),
+      hora: new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      userId: u?.id || null,
+      userNome: u?.nome || null,
+      userPapel: u?.papel || null,
+      produtoId: Number(produtoId) || null,
+      produtoNome: prod?.nome || null,
+      categoria: prod?.cat || null,
+      delta: d,
+      before,
+      after,
+      motivo: String(motivo || ''),
+      origem: String(origem || ''),
+      mesaId: mesaId ? Number(mesaId) : null,
+    });
+    if (state.estoqueMov.length > 5000) state.estoqueMov.length = 5000;
+  }
+
+  function _registrarProdutoRecente(produtoId) {
+    const uid = state.usuarioAtivo?.id;
+    if (!uid) return;
+    const idx = state.usuarios.findIndex(u => u.id === uid);
+    if (idx === -1) return;
+    const u = state.usuarios[idx];
+    const id = Number(produtoId) || 0;
+    if (!id) return;
+    const atuais = Array.isArray(u.recentes) ? u.recentes.map(Number).filter(Boolean) : [];
+    const next = [id, ...atuais.filter(x => x !== id)].slice(0, 12);
+    state.usuarios[idx] = { ...u, recentes: next };
+  }
+
+  function toggleFavoritoProduto(produtoId) {
+    assertLogado();
+    const uid = state.usuarioAtivo?.id;
+    if (!uid) throw new Error('Usuário inválido.');
+    const idx = state.usuarios.findIndex(u => u.id === uid);
+    if (idx === -1) throw new Error('Usuário não encontrado.');
+    const id = Number(produtoId) || 0;
+    if (!id) throw new Error('Produto inválido.');
+    const u = state.usuarios[idx];
+    const atuais = Array.isArray(u.favoritos) ? u.favoritos.map(Number).filter(Boolean) : [];
+    const has = atuais.includes(id);
+    const next = (has ? atuais.filter(x => x !== id) : [...atuais, id]).slice(0, 60);
+    state.usuarios[idx] = { ...u, favoritos: next };
+    logEventoSemRev('ui.toggle_favorito', { produtoId: id, ativo: !has });
+    notificar();
   }
 
   function setorProduto(prod) {
@@ -486,6 +546,8 @@ export function criarStore() {
       mesa.itens.push({ id: prod.id, nome: prod.nome, preco: prod.preco, qty: 1 });
     }
     prod.estoque -= 1;
+    _registrarMovEstoque({ produtoId: prod.id, delta: -1, motivo: 'venda', origem: 'pedido', mesaId });
+    _registrarProdutoRecente(prod.id);
 
     // Adiciona à fila de produção (FIFO)
     const filaItem = criarFilaItem({ mesaId, prod, qty: 1 });
@@ -505,7 +567,10 @@ export function criarStore() {
     if (!item) return;
 
     const prod = getProduto(produtoId);
-    if (prod) prod.estoque += item.qty;
+    if (prod) {
+      prod.estoque += item.qty;
+      _registrarMovEstoque({ produtoId, delta: Number(item.qty) || 0, motivo: 'cancelamento', origem: 'pedido', mesaId });
+    }
 
     mesa.itens = mesa.itens.filter(it => it.id !== produtoId);
     if (mesa.itens.length === 0) mesa.status = 'livre';
@@ -529,12 +594,17 @@ export function criarStore() {
       if (!state.permitirVendaSemEstoque && prod.estoque <= 0) throw new Error('Sem estoque.');
       prod.estoque -= 1;
       item.qty += 1;
+      _registrarMovEstoque({ produtoId, delta: -1, motivo: 'venda', origem: 'pedido', mesaId });
+      _registrarProdutoRecente(produtoId);
       filaItem = criarFilaItem({ mesaId, prod, qty: 1 });
       state.filaProducao.push(filaItem);
     } else {
       item.qty -= 1;
       const prod = getProduto(produtoId);
-      if (prod) prod.estoque += 1;
+      if (prod) {
+        prod.estoque += 1;
+        _registrarMovEstoque({ produtoId, delta: 1, motivo: 'cancelamento', origem: 'pedido', mesaId });
+      }
       if (item.qty <= 0) {
         mesa.itens = mesa.itens.filter(it => it.id !== produtoId);
       }
@@ -643,9 +713,39 @@ export function criarStore() {
     assertAcao('gerenciarMesas');
     const ids = Object.keys(state.mesas).map(Number);
     const novoId = ids.length > 0 ? Math.max(...ids) + 1 : 1;
-    state.mesas[novoId] = { id: novoId, itens: [], status: 'livre', tipo, credito: 0, aplicarTaxa: false };
+    state.mesas[novoId] = { id: novoId, itens: [], status: 'livre', tipo, credito: 0, aplicarTaxa: false, token: '' };
     logAcao('cadastros.adicionar_mesa', { id: novoId, tipo });
     notificar();
+  }
+
+  function garantirTokenMesa(mesaId) {
+    assertLogado();
+    assertTab('cadastros');
+    assertAcao('gerenciarMesas');
+    const id = Number(mesaId) || 0;
+    if (!id) throw new Error('Mesa inválida.');
+    const mesa = getMesa(id);
+    if (!mesa) throw new Error(`Mesa ${id} não existe.`);
+    const atual = normalizarTexto(mesa.token);
+    if (atual) return atual;
+    mesa.token = randomToken(12);
+    logAcao('cadastros.mesa_token.gerar', { mesaId: id });
+    notificar();
+    return mesa.token;
+  }
+
+  function resetarTokenMesa(mesaId) {
+    assertLogado();
+    assertTab('cadastros');
+    assertAcao('gerenciarMesas');
+    const id = Number(mesaId) || 0;
+    if (!id) throw new Error('Mesa inválida.');
+    const mesa = getMesa(id);
+    if (!mesa) throw new Error(`Mesa ${id} não existe.`);
+    mesa.token = randomToken(12);
+    logAcao('cadastros.mesa_token.resetar', { mesaId: id });
+    notificar();
+    return mesa.token;
   }
 
   function removerMesa(id) {
@@ -729,6 +829,12 @@ export function criarStore() {
     }
     const before = state.produtos[index];
     state.produtos[index] = { ...state.produtos[index], ...patch };
+    if (Object.prototype.hasOwnProperty.call(patch, 'estoque')) {
+      const afterEst = Number(state.produtos[index].estoque) || 0;
+      const beforeEst = Number(before.estoque) || 0;
+      const d = afterEst - beforeEst;
+      if (d !== 0) _registrarMovEstoque({ produtoId: id, delta: d, motivo: 'ajuste', origem: 'cadastros', mesaId: null });
+    }
     logAcao('cadastros.editar_produto', { id, before: { nome: before.nome, preco: before.preco, estoque: before.estoque }, after: { nome: state.produtos[index].nome, preco: state.produtos[index].preco, estoque: state.produtos[index].estoque } });
     notificar();
   }
@@ -799,6 +905,7 @@ export function criarStore() {
     if (!prod) return;
     prod.estoque = prod.estoque + delta;
     if (!state.permitirVendaSemEstoque) prod.estoque = Math.max(0, prod.estoque);
+    _registrarMovEstoque({ produtoId, delta, motivo: 'ajuste', origem: 'estoque', mesaId: null });
     logAcao('estoque.ajustar', { produtoId, delta, estoque: prod.estoque });
     notificar();
   }
@@ -1154,6 +1261,26 @@ export function criarStore() {
     if (s.usuarios.length === 0) s.usuarios = [...base.usuarios].map(u => ({ ...u }));
     if (!Array.isArray(s.auditoria)) s.auditoria = [];
     if (!Array.isArray(s.historico)) s.historico = [];
+    if (!Array.isArray(s.estoqueMov)) s.estoqueMov = [];
+    if (!s.mesas || typeof s.mesas !== 'object') s.mesas = { ...base.mesas };
+    const mesasOut = {};
+    Object.entries(s.mesas || {}).forEach(([k, v]) => {
+      const id = Number(v?.id) || Number(k) || 0;
+      if (!id) return;
+      const itens = Array.isArray(v?.itens) ? v.itens.map(it => ({ ...it })) : [];
+      const status = (v?.status === 'ocupada') ? 'ocupada' : 'livre';
+      const tipo = (v?.tipo === 'online') ? 'online' : 'presencial';
+      const credito = Number.isFinite(Number(v?.credito)) ? Number(v.credito) : 0;
+      const aplicarTaxa = !!v?.aplicarTaxa;
+      const token = typeof v?.token === 'string' ? v.token : '';
+      mesasOut[id] = { id, itens, status, tipo, credito, aplicarTaxa, token };
+    });
+    if (Object.keys(mesasOut).length === 0) {
+      s.mesas = { ...base.mesas };
+      normalizou = true;
+    } else {
+      s.mesas = mesasOut;
+    }
     if (!s.integracao || typeof s.integracao !== 'object') s.integracao = { ...base.integracao };
     s.integracao = { ...base.integracao, ...(s.integracao || {}) };
     if (!Number.isFinite(Number(s.integracao.lastSyncServerRev))) s.integracao.lastSyncServerRev = 0;
@@ -1222,6 +1349,10 @@ export function criarStore() {
       if (!Number.isFinite(Number(out.descontoValorMax))) out.descontoValorMax = 0;
       out.descontoPctMax = Math.max(0, Math.min(100, Number(out.descontoPctMax)));
       out.descontoValorMax = Math.max(0, Number(out.descontoValorMax));
+      if (!Array.isArray(out.favoritos)) out.favoritos = [];
+      out.favoritos = out.favoritos.map(Number).filter(Boolean).slice(0, 60);
+      if (!Array.isArray(out.recentes)) out.recentes = [];
+      out.recentes = out.recentes.map(Number).filter(Boolean).slice(0, 12);
       /**
        * Compatibilidade de import:
        * - Se o campo "senhaHash" vier no formato "v1$<salt>$<hash>", reconstrói senhaSalt/senhaHash.
@@ -1316,5 +1447,8 @@ export function criarStore() {
     exportarEstado,
     importarEstado,
     atualizarAcoesPerfil,
+    toggleFavoritoProduto,
+    garantirTokenMesa,
+    resetarTokenMesa,
   };
 }

@@ -377,6 +377,13 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
     -webkit-overflow-scrolling: touch;
     padding: 2px 0 8px;
   }
+  .prod-modes {
+    display: flex;
+    gap: 6px;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 2px 0 8px;
+  }
   .prod-search input {
     width: 100%;
     padding: 10px 12px;
@@ -422,8 +429,19 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
     align-items: center;
     gap: 5px;
     cursor: pointer;
+    position: relative;
   }
   .prod-btn:active { transform: scale(0.99); }
+  .prod-fav {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    font-size: 14px;
+    line-height: 1;
+    color: #c2b8ad;
+    user-select: none;
+  }
+  .prod-fav.active { color: #D9A441; }
   .prod-btn .thumb { width: 70px; height: 70px; border-radius: 14px; }
   .prod-nome {
     font-size: 11.5px;
@@ -481,4 +499,44 @@ h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
 
 @media (max-width: 420px) {
   .mesa-lista { grid-template-columns: repeat(3, 1fr); }
+}
+
+body.cliente-mode {
+  background-attachment: scroll, scroll, scroll, scroll, scroll, scroll;
+}
+
+body.cliente-mode .topbar,
+body.cliente-mode .main {
+  display: none;
+}
+
+.cliente-root {
+  padding: 16px;
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.cliente-top {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 12px;
+  text-align: center;
+}
+
+.cliente-title {
+  font-family: var(--font-title);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  font-size: 18px;
+}
+
+.cliente-sub {
+  color: #6c5a49;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cliente-card {
+  padding: 14px;
 }

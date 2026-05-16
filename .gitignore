@@ -2,7 +2,7 @@ node_modules/
 .expo/
 .expo-home/
 
-data/state.json
+data/
 
 web/assets/uploads/
 web/assets/qr-*.png
