@@ -16,13 +16,42 @@ function criarEstadoInicial() {
     mesas[i] = { id: i, itens: [], status: 'livre', tipo: 'presencial', credito: 0, aplicarTaxa: false };
   }
   return {
+    /**
+     * mesas: mapa { [numeroMesa]: Mesa }
+     * - id: número da mesa
+     * - itens: lista de itens da comanda [{ id(produto), nome, preco, qty }]
+     * - status: 'livre' | 'ocupada'
+     * - tipo: 'presencial' | 'online'
+     * - credito: total já pago/abatido (pagamento parcial)
+     * - aplicarTaxa: trava a taxa quando houver pagamento parcial (evita inconsistência)
+     */
     mesas,
+    /**
+     * permitirVendaSemEstoque:
+     * - false: bloqueia adicionar item quando estoque <= 0 (comportamento padrão)
+     * - true: permite vender mesmo com estoque zerado (modo "manual")
+     */
     permitirVendaSemEstoque: false,
+    /**
+     * sync: metadados de versionamento do estado para sincronização (web/app)
+     * - rev: revisão incremental (sobe a cada alteração relevante)
+     * - updatedAt: timestamp (ms) da última alteração
+     * - updatedBy: quem alterou (id/nome/papel) ou null
+     */
     sync: {
       rev: 0,
       updatedAt: 0,
       updatedBy: null,
     },
+    /**
+     * produtos: catálogo
+     * - id: id interno (inteiro)
+     * - nome, cat, subcat
+     * - preco: número
+     * - estoque: saldo atual
+     * - estoqueMinimo: limite para alerta
+     * - imagem: URL (ou caminho) da imagem
+     */
     produtos: [
       { id: 1, nome: 'Cerveja 600ml',        cat: 'Bebida',    subcat: '', preco: 12,  estoque: 48, estoqueMinimo: 5, imagem: 'https://picsum.photos/seed/cerveja600/600/400' },
       { id: 2, nome: 'Heineken Long Neck',    cat: 'Bebida',    subcat: '', preco: 10,  estoque: 60, estoqueMinimo: 5, imagem: 'https://picsum.photos/seed/heineken/600/400' },
@@ -34,12 +63,28 @@ function criarEstadoInicial() {
       { id: 8, nome: 'Queijo Coalho',         cat: 'Petisco',   subcat: '', preco: 22,  estoque: 25, estoqueMinimo: 5, imagem: 'https://picsum.photos/seed/queijocoalho/600/400' },
     ],
     proxId: 9,
+    /**
+     * categorias/subcategorias:
+     * - categorias: lista de strings (ex.: Bebida, Petisco, ...)
+     * - subcategorias: [{ id, cat, nome }]
+     */
     categorias: ['Bebida', 'Petisco', 'Prato', 'Sobremesa'],
     subcategorias: [],      // { id, cat, nome }
     proxSubcatId: 1,
+    /**
+     * formasPagamento: lista de strings (usado no modal de fechamento e nos relatórios)
+     */
     formasPagamento: ['Dinheiro', 'Cartão de Crédito', 'Cartão de Débito', 'PIX'],
     mesaSelecionada: null,
+    /**
+     * historico: lista de registros de pagamento (fechamento e/ou parcial)
+     * - tipoPagamento: 'fechamento' | 'parcial'
+     * - valorPago e saldoRestante permitem pagamentos parciais.
+     */
     historico: [],          // { mesa, total, subtotal, taxaServico, formaPagamento, hora, itens[] }
+    /**
+     * filaProducao: pedidos a serem preparados por setor (bar/cozinha/churrasco)
+     */
     filaProducao: [],       // { id, mesa, item, qty, tipo, status, horaPedido }
     totalDia: 0,
     empresa: {
@@ -57,7 +102,13 @@ function criarEstadoInicial() {
       perguntarViasSetor: true,
       autoImprimirViasSetor: false,
     },
+    /**
+     * auditoria: log de ações do sistema (até 1000)
+     */
     auditoria: [],
+    /**
+     * integracao: configuração do app mobile para sincronizar com o servidor web
+     */
     integracao: {
       apiBaseUrl: '',
       lastSyncServerRev: 0,
@@ -66,6 +117,11 @@ function criarEstadoInicial() {
       lastSyncSnapshot: null,
       syncHistory: [],
     },
+    /**
+     * sessao/sessoes:
+     * - sessao: sessão atual (token + userId)
+     * - sessoes: mapa token -> { userId, ts }
+     */
     sessao: null,
     sessoes: {},
     perfis: {
@@ -1045,6 +1101,12 @@ export function criarStore() {
         id: u.id,
         nome: u.nome,
         papel: u.papel,
+        /**
+         * senhaHash:
+         * - Internamente o usuário pode ter senhaSalt + senhaHash (sha256Hex(`${salt}:${senha}`)).
+         * - Para exportação/sincronização, colocamos os dois em uma string: "v1$<salt>$<hash>".
+         *   Isso evita perder o salt ao salvar no Supabase (tabela usuarios usa um único campo senha_hash).
+         */
         senhaHash: (u.senhaHash && u.senhaSalt)
           ? `v1$${String(u.senhaSalt)}$${String(u.senhaHash)}`
           : (u.senhaHash || null),
@@ -1160,6 +1222,11 @@ export function criarStore() {
       if (!Number.isFinite(Number(out.descontoValorMax))) out.descontoValorMax = 0;
       out.descontoPctMax = Math.max(0, Math.min(100, Number(out.descontoPctMax)));
       out.descontoValorMax = Math.max(0, Number(out.descontoValorMax));
+      /**
+       * Compatibilidade de import:
+       * - Se o campo "senhaHash" vier no formato "v1$<salt>$<hash>", reconstrói senhaSalt/senhaHash.
+       * - Se vier apenas com hash (formato antigo sem salt), a validação não é possível; o sistema zera a senha.
+       */
       if (typeof out.senhaHash === 'string' && out.senhaHash.startsWith('v1$')) {
         const parts = out.senhaHash.split('$');
         const salt = parts[1] || '';

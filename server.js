@@ -1,3 +1,31 @@
+/**
+ * bar-app/server.js
+ *
+ * Servidor HTTP (Node puro, sem Express):
+ * - Serve o front-end estático em /web (HTML/CSS/JS/imagens).
+ * - Exponde APIs do sistema (estado, sincronização e integrações).
+ *
+ * Persistência do "estado do sistema":
+ * - Preferencialmente no Supabase (tabela definida por SUPABASE_STATE_TABLE, chave id=APP_INSTANCE_ID).
+ * - Fallback local em arquivo JSON (data/state.json) se Supabase não estiver configurado ou se a tabela não existir.
+ *
+ * Variáveis de ambiente importantes:
+ * - PORT: porta do servidor.
+ * - SUPABASE_URL: URL do projeto Supabase (ex.: https://xxxx.supabase.co).
+ * - SUPABASE_SERVICE_ROLE_KEY / SUPABASE_ANON_KEY: chave para acesso (service role ignora RLS; anon precisa de policies).
+ * - SUPABASE_STATE_TABLE: nome da tabela que guarda o estado (default: app_state).
+ * - APP_INSTANCE_ID: id lógico do "ambiente" dentro da tabela (default: default).
+ * - SUPABASE_STORAGE_BUCKET: bucket usado no upload de imagens (default: uploads).
+ *
+ * Endpoints principais:
+ * - GET  /api/state              -> lê estado (Supabase ou arquivo).
+ * - POST /api/state              -> salva estado (Supabase ou arquivo), com detecção de conflito por rev.
+ * - GET  /api/state/stream       -> SSE para avisar mudanças de rev/updatedAt.
+ * - GET  /api/supabase/status    -> status/config do Supabase no servidor (sem expor chaves).
+ * - GET  /api/supabase/cadastros -> exporta cadastros do Supabase para o app.
+ * - POST /api/supabase/cadastros -> salva cadastros do app no Supabase.
+ * - POST /api/upload-image       -> upload de imagem (Supabase Storage ou pasta local).
+ */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');

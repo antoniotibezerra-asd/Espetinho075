@@ -9,24 +9,39 @@ import { formatBRL, agruparPor, nivelEstoque, totalItens, diffSyncSnapshot } fro
 // ─── Inicialização ────────────────────────────────────────────────────────────
 
 const store = criarStore();
-let editandoId = null; // ID do produto sendo editado
-let editandoUsuarioId = null;
-let fechadosFiltrados = [];
-let auditoriaFiltrada = [];
-let carregadoDoServidor = false;
-let _serverInfo = { rev: 0, updatedAt: 0 };
-let _conflitoNotificado = false;
-let _remoteCache = { state: null, server: { rev: 0, updatedAt: 0 } };
-let _supabaseInfo = null;
-let _supabaseInfoTs = 0;
+// Controle de edição na aba "Cadastros"
+let editandoId = null; // id do produto sendo editado (cadastros -> produtos)
+let editandoUsuarioId = null; // id do usuário sendo editado (parâmetros -> usuários)
+
+// Listas temporárias filtradas (usadas para exportação/visão)
+let fechadosFiltrados = []; // cache do modal "Pedidos fechados" com filtros aplicados
+let auditoriaFiltrada = []; // cache de auditoria filtrada (parâmetros -> auditoria)
+
+// Sincronização com o servidor (/api/state)
+let carregadoDoServidor = false; // liga o auto-save somente após o primeiro carregamento
+let _serverInfo = { rev: 0, updatedAt: 0 }; // revisão/timestamp do último estado conhecido do servidor
+let _conflitoNotificado = false; // evita alert repetido quando há conflito de rev
+let _remoteCache = { state: null, server: { rev: 0, updatedAt: 0 } }; // cache do último /api/state
+
+// Integração com Supabase (status e cadastros)
+let _supabaseInfo = null; // resposta do GET /api/supabase/status
+let _supabaseInfoTs = 0; // último momento (ms) que consultamos o status
+
+// Stream de notificações (SSE) para avisar quando o servidor mudou rev/updatedAt
 let _stateStream = null;
 let _stateStreamTs = 0;
+
+// Preferências do seletor rápido de produtos no mobile (persistidas no localStorage por usuário)
 let _mobileProdCat = '';
 let _mobileProdQuery = '';
 let _activeUserIdCache = 0;
-let _pendingSave = false;
-let _lastSavedAt = 0;
-let _lastSaveError = '';
+
+// Indicadores de salvamento (feedback visual)
+let _pendingSave = false; // houve mudança local ainda não confirmada pelo servidor
+let _lastSavedAt = 0; // timestamp do último save OK
+let _lastSaveError = ''; // última mensagem de erro recebida ao salvar
+
+// Dashboard (relatórios): debounce do resize para redesenhar gráficos
 let _relChartResizeTimer = null;
 
 // Reage a qualquer mudança de estado
@@ -344,6 +359,9 @@ async function _autoExportCadastrosIfNeeded() {
   }
 }
 
+// Auto-save: qualquer alteração no store (após carregarInicial) é enviada ao servidor.
+// - Envia { state, ifRev } para evitar sobrescrever estado mais novo sem aviso (409 CONFLICT).
+// - Em caso de conflito, pausa o auto-save e direciona o usuário para resolver via Parâmetros → Sincronização.
 let _saveTimer = null;
 let _saveFailShown = false;
 store.subscribe(() => {
@@ -394,6 +412,11 @@ store.subscribe(() => {
   }, 700);
 });
 
+// Boot do front-end:
+// 1) Baixa o estado do servidor (/api/state) e importa no store.
+// 2) Se o estado importado precisar de "normalização" (ex.: categorias deduplicadas), grava de volta automaticamente.
+// 3) Reabre sessão via token (localStorage) ou força login.
+// 4) Inicia o stream SSE para detectar mudanças vindas de outros dispositivos.
 async function carregarInicial() {
   try {
     const r = await fetch('/api/state');
@@ -449,6 +472,8 @@ async function carregarInicial() {
 
 carregarInicial();
 
+// SSE (/api/state/stream): recebe eventos com { server: { rev, updatedAt } }.
+// Quando rev/updatedAt muda, rebaixa o estado e atualiza o cache local.
 function _iniciarStreamEstado() {
   if (_stateStream) return;
   if (typeof EventSource === 'undefined') return;
@@ -2219,6 +2244,10 @@ function _exportarCSV() {
   _downloadCSV(csv, `relatorio_vendas_${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
+// Relatórios (aba Relatórios):
+// - Os filtros são lidos do DOM e aplicados ao state.historico.
+// - "Pagamentos" = registros do histórico (parcial e/ou fechamento).
+// - "Fechamentos" = tipoPagamento === 'fechamento' (usado para "total vendido" e gráficos por produto/categoria).
 function _getRelatorioFiltros(state) {
   const hoje = new Date().toISOString().slice(0, 10);
   const deEl = document.getElementById('rel-de');
