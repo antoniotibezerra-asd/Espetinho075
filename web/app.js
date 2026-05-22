@@ -543,14 +543,15 @@ async function carregarInicial() {
   const token = localStorage.getItem('sessaoToken') || '';
   const ok = token ? store.restaurarSessao(token) : false;
   if (!ok && !_isClienteMode) _abrirModalUsuario(true);
-  _iniciarStreamEstado();
+  if (!_isClienteMode) _iniciarStreamEstado();
 }
 
-carregarInicial();
+if (!_isClienteMode) carregarInicial();
 
 // SSE (/api/state/stream): recebe eventos com { server: { rev, updatedAt } }.
 // Quando rev/updatedAt muda, rebaixa o estado e atualiza o cache local.
 function _iniciarStreamEstado() {
+  if (_isClienteMode) return;
   if (_stateStream) return;
   if (typeof EventSource === 'undefined') return;
   try {
@@ -1731,6 +1732,9 @@ function _bootClienteMode() {
   let authTelefone = '';
   let authSenha = '';
   let step = 'menu';
+  let navTab = 'home';
+  let bagOpen = false;
+  let authModalOpen = false;
 
   let clienteEntregaTipo = 'entrega';
   let clienteEnderecoTexto = '';
@@ -1939,69 +1943,50 @@ function _bootClienteMode() {
     const isHistory = step === 'history';
     const canSeeWizard = isOnlineFlow && !!authToken && !mesaId;
 
-    root.innerHTML = `
-      <div class="cliente-top">
-        <div class="cliente-title">${empresaNome}</div>
-        <div class="cliente-sub">${_tituloMesa()}</div>
+    if (mesaId && token) navTab = 'orders';
+    if (!mesaId && navTab === 'orders') navTab = 'home';
+    if (!isOnlineFlow && navTab === 'profile') navTab = 'home';
+    if (!isOnlineFlow && tipoLista === 'combo') tipoLista = 'prod';
+    if (isOnlineFlow && !mesaId && authToken && step === 'auth') step = 'menu';
+
+    const heroUrl = String(menu?.empresa?.logoUrl || '').trim() || '/assets/fundo.jpeg';
+    const storeAddr = String(menu?.empresa?.endereco || '').trim();
+    const showCartBar = !bagOpen && cartDetalhes.length > 0 && navTab === 'home';
+    const showAuthModal = isOnlineFlow && (authModalOpen || (!authToken && navTab === 'profile') || (step === 'auth'));
+
+    const homeHtml = `
+      <div class="c-tabs" id="cliente-cats">
+        <button class="c-tab ${!cat ? 'active' : ''}" data-cat="">Avisos</button>
+        ${cats.map(c => `<button class="c-tab ${c === cat ? 'active' : ''}" data-cat="${String(c).replace(/"/g, '&quot;')}">${c}</button>`).join('')}
       </div>
-
-      ${isOnlineFlow ? `
-        <div class="card cliente-card" style="margin-bottom:12px">
-          <div class="row" style="justify-content:space-between; gap:8px; flex-wrap:wrap">
-            <div class="row" style="gap:8px; flex-wrap:wrap">
-              <button class="chip ${isAuth ? 'active' : ''}" id="c-step-auth">Cadastro</button>
-              <button class="chip ${isMenu ? 'active' : ''}" id="c-step-menu" ${(!authToken || mesaId) ? 'disabled style="opacity:0.5"' : ''}>Itens</button>
-              <button class="chip ${isDelivery ? 'active' : ''}" id="c-step-delivery" ${(!authToken || mesaId) ? 'disabled style="opacity:0.5"' : ''}>Entrega</button>
-              <button class="chip ${isPayment ? 'active' : ''}" id="c-step-payment" ${(!authToken || mesaId) ? 'disabled style="opacity:0.5"' : ''}>Pagamento</button>
-              <button class="chip ${isHistory ? 'active' : ''}" id="c-step-history" ${(!authToken) ? 'disabled style="opacity:0.5"' : ''}>Histórico</button>
-            </div>
-            <div class="row" style="gap:8px; align-items:center">
-              ${authToken ? `<span class="badge badge-gray">${String(clienteMe?.apelido || clienteMe?.nome || 'Cliente').trim() || 'Cliente'}</span>` : ''}
-              ${authToken ? `<button class="btn btn-sm" id="c-logout">Sair</button>` : ''}
-            </div>
-          </div>
-        </div>
-      ` : ''}
-
-      ${isAuth ? `
-        <div class="card cliente-card">
-          <div class="row" style="gap:8px; margin-bottom:10px">
-            <button class="chip ${authMode === 'login' ? 'active' : ''}" id="c-auth-login">Entrar</button>
-            <button class="chip ${authMode === 'register' ? 'active' : ''}" id="c-auth-register">Cadastrar</button>
-          </div>
-          ${authMode === 'register' ? `
-            <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
-              <div class="form-group" style="flex:1; min-width:180px">
-                <label style="font-size:12px; font-weight:700; color:#666">Seu nome</label>
-                <input id="c-auth-nome" type="text" value="${String(authNome || '').replace(/"/g, '&quot;')}" />
+      <div class="c-type" id="cliente-tipo">
+        <button class="c-chip chip ${tipoLista === 'all' ? 'active' : ''}" data-t="all">Todos</button>
+        <button class="c-chip chip ${tipoLista === 'prod' ? 'active' : ''}" data-t="prod">Produtos</button>
+        ${isOnlineFlow ? `<button class="c-chip chip ${tipoLista === 'combo' ? 'active' : ''}" data-t="combo">Combos</button>` : ''}
+      </div>
+      <div class="c-prod-list prod-picker" id="cliente-prods">
+        ${visiveis.map(p => {
+          const inCart = cartById.get(Number(p.id)) || 0;
+          const dis = !p.disponivel;
+          return `
+            <button class="c-prod prod-btn" data-id="${p.id}" ${dis ? 'disabled style="opacity:0.45"' : ''}>
+              ${p.imagem ? `<img class="thumb" src="${p.imagem}" alt="" onerror="this.style.display='none'">` : `<div class="thumb placeholder">🖼️</div>`}
+              <div class="c-prod-info">
+                <div class="c-prod-nome">${p.nome}</div>
+                <div class="c-prod-preco">${formatBRL(precoLista(p))}${inCart ? ` · ${inCart}x` : ''}${dis ? ' · Indisponível' : ''}</div>
               </div>
-              <div class="form-group" style="flex:1; min-width:180px">
-                <label style="font-size:12px; font-weight:700; color:#666">Como quer ser chamado</label>
-                <input id="c-auth-apelido" type="text" value="${String(authApelido || '').replace(/"/g, '&quot;')}" />
-              </div>
-            </div>
-          ` : ''}
-          <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
-            <div class="form-group" style="flex:1; min-width:180px">
-              <label style="font-size:12px; font-weight:700; color:#666">WhatsApp</label>
-              <input id="c-auth-tel" type="tel" value="${String(authTelefone || '').replace(/"/g, '&quot;')}" />
-            </div>
-            <div class="form-group" style="flex:1; min-width:180px">
-              <label style="font-size:12px; font-weight:700; color:#666">Senha</label>
-              <input id="c-auth-senha" type="password" value="" />
-            </div>
-          </div>
-          <div class="row" style="gap:8px; justify-content:flex-end">
-            <button class="btn btn-primary" id="c-auth-submit">${authMode === 'login' ? 'Entrar' : 'Cadastrar'}</button>
-          </div>
-          <div class="empty-msg" id="cliente-status" style="padding:10px 0; display:${status ? 'block' : 'none'}">${status || ''}</div>
-        </div>
-      ` : ''}
+            </button>
+          `;
+        }).join('')}
+      </div>
+      <div id="cliente-prods-empty" class="empty-msg" style="display:${visiveis.length ? 'none' : 'block'}; padding:14px 0">Nenhum item encontrado.</div>
+    `;
 
+    const ordersHtml = `
       ${showStatus ? `
-        <div class="card cliente-card" style="margin-bottom:12px">
+        <div class="card cliente-card" style="margin-top:12px">
           <div class="row" style="justify-content:space-between; margin-bottom:8px">
-            <div style="font-weight:800">Status</div>
+            <div style="font-weight:900">Status do pedido</div>
             <span class="badge badge-${statusLabel === 'Pronto' ? 'green' : statusLabel === 'Em preparo' ? 'amber' : 'blue'}">${statusLabel || '—'}</span>
           </div>
           <div class="row" style="gap:8px; margin-bottom:10px; flex-wrap:wrap; justify-content:flex-end">
@@ -2017,12 +2002,12 @@ function _bootClienteMode() {
             `).join('') || `<div class="empty-msg" style="padding:8px 0">Atualizando...</div>`}
           </div>
         </div>
-      ` : ''}
-
-      ${isHistory ? `
-        <div class="card cliente-card">
+      ` : `<div class="empty-msg" style="padding:18px 0">Nenhum pedido ativo.</div>`}
+      ${isOnlineFlow ? `
+        <div class="card cliente-card" style="margin-top:12px">
+          <div style="font-weight:900; margin-bottom:10px">Histórico de pedidos</div>
           ${(pedidosLoading ? `<div class="empty-msg" style="padding:8px 0">Carregando...</div>` : '')}
-          ${(!pedidosLoading && pedidos.length === 0) ? `<div class="empty-msg" style="padding:8px 0">Nenhum pedido ainda.</div>` : ''}
+          ${(!pedidosLoading && pedidos.length === 0) ? `<div class="empty-msg" style="padding:8px 0">Você ainda não possui pedidos nesta loja.</div>` : ''}
           <div class="simple-list" style="gap:8px">
             ${(!pedidosLoading ? pedidos.map(p => {
               const when = p.ts ? new Date(p.ts).toLocaleString('pt-BR') : '';
@@ -2042,144 +2027,338 @@ function _bootClienteMode() {
           </div>
         </div>
       ` : ''}
+    `;
 
-      ${(isMenu || _flowKind === 'mesa') ? `
-      <div class="card cliente-card" style="display:${isMenu || _flowKind === 'mesa' ? 'block' : 'none'}">
-        <div class="prod-search"><input id="cliente-busca" type="search" placeholder="Buscar..." value="${String(q || '').replace(/"/g, '&quot;')}" /></div>
-        <div class="prod-filters" style="margin-bottom:10px" id="cliente-tipo">
-          <button class="chip ${tipoLista === 'all' ? 'active' : ''}" data-t="all">Todos</button>
-          <button class="chip ${tipoLista === 'prod' ? 'active' : ''}" data-t="prod">Produtos</button>
-          ${isOnlineFlow ? `<button class="chip ${tipoLista === 'combo' ? 'active' : ''}" data-t="combo">Combos</button>` : ''}
-        </div>
-        <div class="prod-filters" id="cliente-cats">
-          <button class="chip ${!cat ? 'active' : ''}" data-cat="">Todos</button>
-          ${cats.map(c => `<button class="chip ${c === cat ? 'active' : ''}" data-cat="${String(c).replace(/"/g, '&quot;')}">${c}</button>`).join('')}
-        </div>
-        <div class="prod-picker" id="cliente-prods">
-          ${visiveis.map(p => {
-            const inCart = cartById.get(Number(p.id)) || 0;
-            const dis = !p.disponivel;
-            return `
-              <button class="prod-btn" data-id="${p.id}" ${dis ? 'disabled style="opacity:0.4"' : ''}>
-                ${p.imagem ? `<img class="thumb" src="${p.imagem}" alt="" onerror="this.style.display='none'">` : `<div class="thumb placeholder">🖼️</div>`}
-                <div class="prod-nome">${p.nome}</div>
-                <div class="prod-preco">${formatBRL(precoLista(p))}${inCart ? ` · ${inCart}x` : ''}${dis ? ' · Indisponível' : ''}</div>
-              </button>
-            `;
-          }).join('')}
-        </div>
-        <div id="cliente-prods-empty" class="empty-msg" style="display:${visiveis.length ? 'none' : 'block'}">Nenhum item encontrado.</div>
-      </div>
-      ` : ''}
-
-      ${(canSeeWizard || _flowKind === 'mesa') ? `
-      <div class="card cliente-card" style="margin-top:12px; display:${(isDelivery || isPayment || _flowKind === 'mesa') ? 'block' : 'none'}">
-
+    const profileHtml = `
+      <div class="card cliente-card" style="margin-top:12px">
+        <div style="font-weight:900; margin-bottom:10px">Perfil</div>
         ${isOnlineFlow ? `
-          <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
-            <div class="form-group" style="flex:1; min-width:180px">
-              <label style="font-size:12px; font-weight:700; color:#666">Entrega ou Retirada</label>
-              <select id="cliente-entrega-tipo" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">
-                <option value="entrega" ${ent === 'entrega' ? 'selected' : ''}>Entrega</option>
-                <option value="retirada" ${ent === 'retirada' ? 'selected' : ''}>Retirada</option>
-              </select>
+          ${authToken ? `
+            <div class="simple-item"><span>Nome</span><span>${String(clienteMe?.apelido || clienteMe?.nome || '').trim() || '—'}</span></div>
+            <div class="simple-item"><span>WhatsApp</span><span>${String(clienteMe?.telefone || '').trim() || '—'}</span></div>
+            <div style="margin-top:12px">
+              <button class="btn" id="c-logout" style="width:100%">Sair</button>
             </div>
+          ` : `
+            <div class="empty-msg" style="padding:8px 0">Faça login para ver seus pedidos e finalizar compras.</div>
+            <button class="c-primary-btn" id="c-open-auth">Fazer login</button>
+          `}
+        ` : `
+          <div class="empty-msg" style="padding:8px 0">Perfil disponível apenas no pedido online.</div>
+        `}
+      </div>
+    `;
+
+    const sheetHtml = bagOpen ? `
+      <div class="c-sheet-backdrop" id="c-sheet">
+        <div class="c-sheet" role="dialog" aria-modal="true">
+          <div class="c-sheet-head">
+            <div class="c-sheet-title">Sua sacola</div>
+            <button class="c-x" id="c-close-bag">×</button>
           </div>
 
-          ${showEndereco ? `
-            <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
-              <div class="form-group" style="flex:2; min-width:220px">
-                <label style="font-size:12px; font-weight:700; color:#666">Endereço completo</label>
-                <textarea id="cliente-endereco" rows="2" placeholder="Rua, número, bairro, cidade" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">${String(clienteEnderecoTexto || '').replace(/</g, '&lt;')}</textarea>
-              </div>
-              <div class="form-group" style="flex:1; min-width:180px">
-                <label style="font-size:12px; font-weight:700; color:#666">Ponto de referência</label>
-                <input id="cliente-referencia" type="text" placeholder="Ex: perto da farmácia" value="${String(clienteReferencia || '').replace(/"/g, '&quot;')}" />
-              </div>
+          ${isOnlineFlow ? `
+            <div style="margin-top:12px">
+              <button class="c-action" id="c-calc-delivery">Calcular taxa de entrega</button>
             </div>
-            <div class="row" style="gap:8px; margin-bottom:10px; flex-wrap:wrap; justify-content:flex-end">
-              <button class="btn btn-sm" id="cliente-geo">📍 Usar localização atual</button>
-              <button class="btn btn-sm" id="cliente-maps">🗺️ Abrir Maps</button>
-            </div>
-            <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
-              <div class="form-group" style="flex:1; min-width:220px">
-                <label style="font-size:12px; font-weight:700; color:#666">Link do Maps (opcional)</label>
-                <input id="cliente-maps-url" type="url" placeholder="Cole aqui o link compartilhado" value="${String(clienteMapsUrl || '').replace(/"/g, '&quot;')}" />
+          ` : ''}
+
+          <div style="margin-top:12px" id="cliente-cart">
+            ${cartDetalhes.length
+              ? cartDetalhes.map(it => `
+                  <div class="item-row">
+                    <div class="item-info">
+                      <div class="item-nome">${it.nome}</div>
+                      <div class="item-preco">${formatBRL(it.preco)} · ${it.qty}x</div>
+                    </div>
+                    <div class="row" style="gap:6px">
+                      <button class="qty-btn" data-act="dec" data-id="${it.id}">−</button>
+                      <button class="qty-btn" data-act="inc" data-id="${it.id}">+</button>
+                      <button class="remove-btn" data-act="rm" data-id="${it.id}">×</button>
+                    </div>
+                  </div>
+                `).join('')
+              : `<div class="empty-msg" style="padding:10px 0">Sua sacola está vazia.</div>`
+            }
+          </div>
+
+          <div style="margin-top:12px">
+            <button class="c-muted-btn" id="c-add-more">Adicionar mais itens</button>
+          </div>
+
+          <div class="c-totals">
+            <div class="row"><span>Subtotal</span><span>${formatBRL(subtotalCart)}</span></div>
+            <div class="row" style="opacity:${taxaEntregaEfetiva > 0 ? '1' : '0.6'}"><span>Taxa de entrega</span><span>${formatBRL(taxaEntregaEfetiva)}</span></div>
+            <div class="row" style="font-weight:900; font-size:16px; color:#111; margin-top:8px"><span>Total</span><span>${formatBRL(totalFinal)}</span></div>
+          </div>
+
+          ${isOnlineFlow ? `
+            <div style="margin-top:12px">
+              <div class="simple-item">
+                <span>Tem um cupom?<br><span style="color:#777; font-size:12px">Clique e insira o código</span></span>
+                <span>›</span>
               </div>
             </div>
           ` : ''}
 
-        ` : ''}
+          ${(canSeeWizard || _flowKind === 'mesa') ? `
+            <div style="margin-top:14px">
+              ${isOnlineFlow ? `
+                ${step === 'delivery' ? `
+                  <div style="font-weight:900; margin-bottom:10px">Entrega</div>
+                  <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+                    <div class="form-group" style="flex:1; min-width:180px">
+                      <label style="font-size:12px; font-weight:700; color:#666">Entrega ou Retirada</label>
+                      <select id="cliente-entrega-tipo" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">
+                        <option value="entrega" ${ent === 'entrega' ? 'selected' : ''}>Entrega</option>
+                        <option value="retirada" ${ent === 'retirada' ? 'selected' : ''}>Retirada</option>
+                      </select>
+                    </div>
+                  </div>
+                  ${showEndereco ? `
+                    <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+                      <div class="form-group" style="flex:2; min-width:220px">
+                        <label style="font-size:12px; font-weight:700; color:#666">Endereço completo</label>
+                        <textarea id="cliente-endereco" rows="2" placeholder="Rua, número, bairro, cidade" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">${String(clienteEnderecoTexto || '').replace(/</g, '&lt;')}</textarea>
+                      </div>
+                      <div class="form-group" style="flex:1; min-width:180px">
+                        <label style="font-size:12px; font-weight:700; color:#666">Ponto de referência</label>
+                        <input id="cliente-referencia" type="text" placeholder="Ex: perto da farmácia" value="${String(clienteReferencia || '').replace(/"/g, '&quot;')}" />
+                      </div>
+                    </div>
+                    <div class="row" style="gap:8px; margin-bottom:10px; flex-wrap:wrap; justify-content:flex-end">
+                      <button class="btn btn-sm" id="cliente-geo">📍 Usar localização atual</button>
+                      <button class="btn btn-sm" id="cliente-maps">🗺️ Abrir Maps</button>
+                    </div>
+                    <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+                      <div class="form-group" style="flex:1; min-width:220px">
+                        <label style="font-size:12px; font-weight:700; color:#666">Link do Maps (opcional)</label>
+                        <input id="cliente-maps-url" type="url" placeholder="Cole aqui o link compartilhado" value="${String(clienteMapsUrl || '').replace(/"/g, '&quot;')}" />
+                      </div>
+                    </div>
+                  ` : ''}
+                ` : ''}
 
-        <div class="row" style="gap:8px; justify-content:space-between; align-items:center; margin-top:6px">
-          <div style="font-weight:700">${isDelivery ? 'Entrega' : 'Pagamento'}</div>
-          <div class="badge badge-blue">${formatBRL(totalFinal)}</div>
-        </div>
-        ${taxaEntregaEfetiva > 0 ? `
-          <div class="total-bar" style="margin-top:8px">
-            <span class="total-label">Entrega</span>
-            <div class="spacer"></div>
-            <span class="total-val" style="font-size:14px">${formatBRL(taxaEntregaEfetiva)}</span>
-          </div>
-        ` : ''}
+                ${(step === 'payment') ? `
+                  <div style="font-weight:900; margin-bottom:10px">Pagamento</div>
+                  <div class="row" style="gap:10px; margin-top:10px; flex-wrap:wrap">
+                    <div class="form-group" style="flex:1; min-width:180px">
+                      <label style="font-size:12px; font-weight:700; color:#666">Forma de pagamento</label>
+                      <select id="cliente-pagamento" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">
+                        <option value="">Selecione...</option>
+                        ${(pgs.length ? pgs : ['Dinheiro', 'PIX', 'Cartão']).map(pg => `<option value="${String(pg).replace(/"/g, '&quot;')}" ${String(clienteFormaPagamento||'')===String(pg)?'selected':''}>${pg}</option>`).join('')}
+                      </select>
+                    </div>
+                    ${showTroco ? `
+                      <div class="form-group" style="flex:1; min-width:180px">
+                        <label style="font-size:12px; font-weight:700; color:#666">Troco para (R$)</label>
+                        <input id="cliente-troco" type="number" placeholder="0.00" min="0" step="0.01" value="${String(clienteTrocoPara || '').replace(/"/g, '&quot;')}" />
+                      </div>
+                    ` : ''}
+                  </div>
+                  <div class="row" style="gap:10px; margin-top:10px; flex-wrap:wrap">
+                    <div class="form-group" style="flex:1; min-width:220px">
+                      <label style="font-size:12px; font-weight:700; color:#666">Observações (opcional)</label>
+                      <textarea id="cliente-obs" rows="2" placeholder="Ex: sem cebola, caprichar no molho...">${String(clienteObservacao || '').replace(/</g, '&lt;')}</textarea>
+                    </div>
+                  </div>
+                ` : ''}
+              ` : ''}
 
-        ${isPayment || _flowKind === 'mesa' ? `
-          <div class="row" style="gap:10px; margin-top:10px; flex-wrap:wrap">
-            <div class="form-group" style="flex:1; min-width:180px">
-              <label style="font-size:12px; font-weight:700; color:#666">Forma de pagamento</label>
-              <select id="cliente-pagamento" style="width:100%; padding:10px 12px; border:var(--border); border-radius:12px; font-family:var(--font); font-size:13px; background:rgba(255,255,255,0.95)">
-                <option value="">Selecione...</option>
-                ${(pgs.length ? pgs : ['Dinheiro', 'PIX', 'Cartão']).map(pg => `<option value="${String(pg).replace(/"/g, '&quot;')}" ${String(clienteFormaPagamento||'')===String(pg)?'selected':''}>${pg}</option>`).join('')}
-              </select>
+              <div class="row" style="gap:10px; margin-top:12px; flex-wrap:wrap">
+                <button class="btn" id="cliente-limpar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Limpar</button>
+                ${canSeeWizard ? `
+                  ${step === 'menu' ? `<button class="c-primary-btn" id="c-next-menu" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.45"'}>Continuar pedido</button>` : ''}
+                  ${step === 'delivery' ? `<button class="c-primary-btn" id="c-next-delivery" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.45"'}>Ir para pagamento</button>` : ''}
+                  ${step === 'payment' ? `<button class="c-primary-btn" id="cliente-enviar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.45"'}>Confirmar pedido</button>` : ''}
+                ` : `<button class="c-primary-btn" id="cliente-enviar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.45"'}>Continuar pedido</button>`}
+              </div>
+              <div class="empty-msg" id="cliente-status" style="padding:10px 0; display:${status ? 'block' : 'none'}">${status || ''}</div>
             </div>
-            ${showTroco ? `
+          ` : ''}
+        </div>
+      </div>
+    ` : '';
+
+    const authHtml = showAuthModal ? `
+      <div class="c-modal-backdrop" id="c-auth-modal">
+        <div class="c-modal" role="dialog" aria-modal="true">
+          <div class="c-modal-head">
+            <div class="c-modal-title">Fazer login</div>
+            <button class="c-x" id="c-close-auth">×</button>
+          </div>
+          <div style="margin-top:12px">
+            <div class="row" style="gap:8px; margin-bottom:10px">
+              <button class="chip ${authMode === 'login' ? 'active' : ''}" id="c-auth-login">Entrar</button>
+              <button class="chip ${authMode === 'register' ? 'active' : ''}" id="c-auth-register">Cadastrar</button>
+            </div>
+            ${authMode === 'register' ? `
+              <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
+                <div class="form-group" style="flex:1; min-width:180px">
+                  <label style="font-size:12px; font-weight:700; color:#666">Seu nome</label>
+                  <input id="c-auth-nome" type="text" value="${String(authNome || '').replace(/"/g, '&quot;')}" />
+                </div>
+                <div class="form-group" style="flex:1; min-width:180px">
+                  <label style="font-size:12px; font-weight:700; color:#666">Como quer ser chamado</label>
+                  <input id="c-auth-apelido" type="text" value="${String(authApelido || '').replace(/"/g, '&quot;')}" />
+                </div>
+              </div>
+            ` : ''}
+            <div class="row" style="gap:10px; margin-bottom:10px; flex-wrap:wrap">
               <div class="form-group" style="flex:1; min-width:180px">
-                <label style="font-size:12px; font-weight:700; color:#666">Troco para (R$)</label>
-                <input id="cliente-troco" type="number" placeholder="0.00" min="0" step="0.01" value="${String(clienteTrocoPara || '').replace(/"/g, '&quot;')}" />
+                <label style="font-size:12px; font-weight:700; color:#666">WhatsApp</label>
+                <input id="c-auth-tel" type="tel" value="${String(authTelefone || '').replace(/"/g, '&quot;')}" />
+              </div>
+              <div class="form-group" style="flex:1; min-width:180px">
+                <label style="font-size:12px; font-weight:700; color:#666">Senha</label>
+                <input id="c-auth-senha" type="password" value="" />
+              </div>
+            </div>
+            <button class="c-primary-btn" id="c-auth-submit">${authMode === 'login' ? 'Entrar' : 'Cadastrar'}</button>
+            <div class="empty-msg" id="cliente-status" style="padding:10px 0; display:${status ? 'block' : 'none'}">${status || ''}</div>
+          </div>
+        </div>
+      </div>
+    ` : '';
+
+    root.innerHTML = `
+      <div class="c-shell">
+        <div class="c-hero" style="background-image:url('${heroUrl.replace(/"/g, '&quot;')}')">
+          <div class="c-hero-inner">
+            <div class="c-search">
+              <span style="font-weight:900">🔎</span>
+              <input id="cliente-busca" type="search" placeholder="Buscar no cardápio" value="${String(q || '').replace(/"/g, '&quot;')}" />
+            </div>
+          </div>
+        </div>
+
+        <div class="c-wrap c-store">
+          <div class="c-store-card">
+            <div class="c-store-name">${empresaNome}</div>
+            <div class="c-store-sub">${storeAddr ? storeAddr : _tituloMesa()}</div>
+            ${isOnlineFlow ? `
+              <div class="c-action-row">
+                <button class="c-action" id="c-calc-delivery">Calcular taxa de entrega</button>
               </div>
             ` : ''}
           </div>
-          <div class="row" style="gap:10px; margin-top:10px; flex-wrap:wrap">
-            <div class="form-group" style="flex:1; min-width:220px">
-              <label style="font-size:12px; font-weight:700; color:#666">Observações (opcional)</label>
-              <textarea id="cliente-obs" rows="2" placeholder="Ex: sem cebola, caprichar no molho...">${String(clienteObservacao || '').replace(/</g, '&lt;')}</textarea>
+        </div>
+
+        <div class="c-wrap" style="padding-top:12px; padding-bottom:16px">
+          ${navTab === 'home' ? homeHtml : (navTab === 'orders' ? ordersHtml : profileHtml)}
+        </div>
+
+        ${showCartBar ? `
+          <div class="c-cartbar" id="c-cartbar">
+            <div style="display:flex; align-items:center; gap:10px">
+              <span style="font-weight:900">🛍️</span>
+              <span style="font-weight:900">${formatBRL(subtotalCart)}</span>
             </div>
+            <button id="c-open-bag">Ver sacola</button>
           </div>
         ` : ''}
 
-        <div id="cliente-cart">
-          ${cartDetalhes.length
-            ? cartDetalhes.map(it => `
-                <div class="item-row">
-                  <div class="item-info">
-                    <div class="item-nome">${it.nome}</div>
-                    <div class="item-preco">${formatBRL(it.preco)} · ${it.qty}x</div>
-                  </div>
-                  <div class="row" style="gap:6px">
-                    <button class="qty-btn" data-act="dec" data-id="${it.id}">−</button>
-                    <button class="qty-btn" data-act="inc" data-id="${it.id}">+</button>
-                    <button class="remove-btn" data-act="rm" data-id="${it.id}">×</button>
-                  </div>
-                </div>
-              `).join('')
-            : `<p class="empty-msg" style="padding:10px 0">Toque nos itens para adicionar.</p>`
-          }
+        <div class="c-bottomnav" id="c-bottomnav">
+          <button class="c-navbtn ${navTab === 'home' ? 'active' : ''}" data-tab="home"><span class="c-ico">⌂</span><span>Home</span></button>
+          <button class="c-navbtn ${navTab === 'orders' ? 'active' : ''}" data-tab="orders"><span class="c-ico">🧾</span><span>Pedidos</span></button>
+          <button class="c-navbtn ${navTab === 'profile' ? 'active' : ''}" data-tab="profile"><span class="c-ico">👤</span><span>Perfil</span></button>
         </div>
-        <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap">
-          <button class="btn" id="cliente-limpar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Limpar</button>
-          ${canSeeWizard ? `
-            ${isMenu ? `<button class="btn btn-primary" id="c-next-menu" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Continuar</button>` : ''}
-            ${isDelivery ? `<button class="btn btn-primary" id="c-next-delivery" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Ir para pagamento</button>` : ''}
-            ${isPayment ? `<button class="btn btn-primary" id="cliente-enviar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Confirmar pedido</button>` : ''}
-          ` : `<button class="btn btn-primary" id="cliente-enviar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Enviar pedido</button>`}
-        </div>
-        <div class="empty-msg" id="cliente-status" style="padding:10px 0; display:${status ? 'block' : 'none'}">${status || ''}</div>
+
+        ${sheetHtml}
+        ${authHtml}
       </div>
-      ` : ''}
     `;
 
     const btnLogout = root.querySelector('#c-logout');
     if (btnLogout) btnLogout.addEventListener('click', _logout);
+
+    const navEl = root.querySelector('#c-bottomnav');
+    if (navEl) {
+      navEl.addEventListener('click', async (e) => {
+        const b = e.target.closest('button[data-tab]');
+        if (!b) return;
+        const t = String(b.getAttribute('data-tab') || 'home');
+        navTab = (t === 'orders' ? 'orders' : (t === 'profile' ? 'profile' : 'home'));
+        if (navTab === 'profile' && isOnlineFlow && !authToken) authModalOpen = true;
+        if (navTab === 'orders' && isOnlineFlow && authToken) await _loadPedidos();
+        renderCliente();
+      });
+    }
+
+    const btnOpenBag = root.querySelector('#c-open-bag');
+    if (btnOpenBag) {
+      btnOpenBag.addEventListener('click', () => {
+        bagOpen = true;
+        if (canSeeWizard && (step !== 'menu' && step !== 'delivery' && step !== 'payment')) step = 'menu';
+        renderCliente();
+      });
+    }
+
+    const btnCloseBag = root.querySelector('#c-close-bag');
+    if (btnCloseBag) {
+      btnCloseBag.addEventListener('click', () => {
+        bagOpen = false;
+        renderCliente();
+      });
+    }
+
+    const sheetEl = root.querySelector('#c-sheet');
+    if (sheetEl) {
+      sheetEl.addEventListener('click', (e) => {
+        if (e.target === sheetEl) {
+          bagOpen = false;
+          renderCliente();
+        }
+      });
+    }
+
+    const btnAddMore = root.querySelector('#c-add-more');
+    if (btnAddMore) {
+      btnAddMore.addEventListener('click', () => {
+        bagOpen = false;
+        navTab = 'home';
+        if (canSeeWizard) step = 'menu';
+        renderCliente();
+      });
+    }
+
+    const btnCalcDelivery = root.querySelector('#c-calc-delivery');
+    if (btnCalcDelivery) {
+      btnCalcDelivery.addEventListener('click', () => {
+        if (isOnlineFlow && !mesaId && authToken) step = 'delivery';
+        bagOpen = true;
+        renderCliente();
+      });
+    }
+
+    const btnOpenAuth = root.querySelector('#c-open-auth');
+    if (btnOpenAuth) {
+      btnOpenAuth.addEventListener('click', () => {
+        if (!isOnlineFlow) return;
+        authModalOpen = true;
+        renderCliente();
+      });
+    }
+
+    const btnCloseAuth = root.querySelector('#c-close-auth');
+    if (btnCloseAuth) {
+      btnCloseAuth.addEventListener('click', () => {
+        authModalOpen = false;
+        if (!authToken && navTab === 'profile') navTab = 'home';
+        renderCliente();
+      });
+    }
+
+    const authModalEl = root.querySelector('#c-auth-modal');
+    if (authModalEl) {
+      authModalEl.addEventListener('click', (e) => {
+        if (e.target === authModalEl) {
+          authModalOpen = false;
+          if (!authToken && navTab === 'profile') navTab = 'home';
+          renderCliente();
+        }
+      });
+    }
 
     const btnStepAuth = root.querySelector('#c-step-auth');
     const btnStepMenu = root.querySelector('#c-step-menu');
@@ -2227,6 +2406,8 @@ function _bootClienteMode() {
           status = '';
           await _loadMe();
           step = 'menu';
+          authModalOpen = false;
+          if (navTab === 'profile') navTab = 'home';
           renderCliente();
         } catch {
           status = 'Sem conexão. Tente novamente.';
@@ -2359,7 +2540,7 @@ function _bootClienteMode() {
     const tipoEl = root.querySelector('#cliente-tipo');
     if (tipoEl) {
       tipoEl.addEventListener('click', (e) => {
-        const b = e.target.closest('.chip');
+        const b = e.target.closest('button[data-t]');
         if (!b) return;
         const t = String(b.getAttribute('data-t') || 'all');
         tipoLista = (t === 'combo' ? 'combo' : (t === 'prod' ? 'prod' : 'all'));
@@ -2370,7 +2551,7 @@ function _bootClienteMode() {
     const catsEl = root.querySelector('#cliente-cats');
     if (catsEl) {
       catsEl.addEventListener('click', (e) => {
-        const b = e.target.closest('.chip');
+        const b = e.target.closest('button[data-cat]');
         if (!b) return;
         cat = String(b.getAttribute('data-cat') || '');
         renderCliente();
@@ -2454,7 +2635,15 @@ function _bootClienteMode() {
           renderCliente();
           return;
         }
-        if (!mesaId && isOnlineFlow && !authToken) { status = 'Faça login.'; step = 'auth'; renderCliente(); return; }
+        if (!mesaId && isOnlineFlow && !authToken) {
+          status = 'Faça login.';
+          step = 'auth';
+          authModalOpen = true;
+          bagOpen = false;
+          navTab = 'profile';
+          renderCliente();
+          return;
+        }
         if (isOnlineFlow) {
           const entNow = (String(clienteEntregaTipo || '').trim().toLowerCase() === 'retirada') ? 'retirada' : 'entrega';
           const hasLatLng = Number.isFinite(Number(clienteLat)) && Number.isFinite(Number(clienteLng));
