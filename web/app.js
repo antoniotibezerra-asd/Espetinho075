@@ -1950,7 +1950,7 @@ function _bootClienteMode() {
     if (!isOnlineFlow && tipoLista === 'combo') tipoLista = 'prod';
     if (isOnlineFlow && !mesaId && authToken && step === 'auth') step = 'menu';
 
-    const heroUrl = String(menu?.empresa?.logoUrl || '').trim() || '/assets/fundo.jpeg';
+    const heroUrl = '/assets/logo-espetinho.jpg';
     const storeAddr = String(menu?.empresa?.endereco || '').trim();
     const showCartBar = !bagOpen && cartDetalhes.length > 0 && navTab === 'home';
     const showAuthModal = isOnlineFlow && (authModalOpen || (!authToken && navTab === 'profile') || (step === 'auth'));
@@ -2079,7 +2079,7 @@ function _bootClienteMode() {
                     </div>
                   </div>
                 `).join('')
-              : `<div class="empty-msg" style="padding:10px 0">Sua sacola está vazia.</div>`
+              : `<div class="empty-msg" style="padding:10px 0">Sacola vazia</div>`
             }
           </div>
 
@@ -2235,8 +2235,13 @@ function _bootClienteMode() {
 
         <div class="c-wrap c-store">
           <div class="c-store-card">
-            <div class="c-store-name">${empresaNome}</div>
-            <div class="c-store-sub">${storeAddr ? storeAddr : _tituloMesa()}</div>
+            <div class="c-store-head">
+              <img class="c-store-logo" src="/assets/logo-espetinho.jpg" alt="" onerror="this.style.display='none'">
+              <div class="c-store-meta">
+                <div class="c-store-name">${empresaNome}</div>
+                <div class="c-store-sub">${storeAddr ? storeAddr : _tituloMesa()}</div>
+              </div>
+            </div>
             ${isOnlineFlow ? `
               <div class="c-action-row">
                 <button class="c-action" id="c-calc-delivery">Calcular taxa de entrega</button>
@@ -2260,7 +2265,7 @@ function _bootClienteMode() {
         ` : ''}
 
         <div class="c-bottomnav" id="c-bottomnav">
-          <button class="c-navbtn ${navTab === 'home' ? 'active' : ''}" data-tab="home"><span class="c-ico">⌂</span><span>Home</span></button>
+          <button class="c-navbtn ${navTab === 'home' ? 'active' : ''}" data-tab="home"><span class="c-ico">⌂</span><span>Início</span></button>
           <button class="c-navbtn ${navTab === 'orders' ? 'active' : ''}" data-tab="orders"><span class="c-ico">🧾</span><span>Pedidos</span></button>
           <button class="c-navbtn ${navTab === 'profile' ? 'active' : ''}" data-tab="profile"><span class="c-ico">👤</span><span>Perfil</span></button>
         </div>

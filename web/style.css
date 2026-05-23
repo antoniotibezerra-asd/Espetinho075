@@ -596,8 +596,11 @@ body.cliente-mode .c-shell {
 }
 
 body.cliente-mode .c-hero {
-  height: 84px;
+  height: 160px;
   background: #fff;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   position: relative;
 }
 
@@ -655,6 +658,27 @@ body.cliente-mode .c-store-card {
   border-radius: 12px;
   padding: 12px;
   box-shadow: none;
+}
+
+body.cliente-mode .c-store-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+body.cliente-mode .c-store-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: var(--border);
+  background: #fff;
+  flex-shrink: 0;
+}
+
+body.cliente-mode .c-store-meta {
+  flex: 1;
+  min-width: 0;
 }
 
 body.cliente-mode .c-store-name {
