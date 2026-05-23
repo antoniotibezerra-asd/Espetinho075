@@ -102,6 +102,7 @@ window.app = {
   addSubcategoria()    { _addSubcategoria(); },
   removeSubcategoria(id) { try { store.removerSubcategoria(id); } catch (e) { alert(e.message); } },
   cancelarEdicao()     { _cancelarEdicao(); },
+  limparCadastro()     { _limparCadastro(); },
   editProduto(id)      { _prepararEdicao(id); },
   removeProduto(id)    { try { store.removerProduto(id); } catch (e) { alert(e.message); } },
   ajustarEstoque(id, d){ try { store.ajustarEstoque(id, d); } catch (e) { alert(e.message); } },
@@ -3920,12 +3921,20 @@ function _prepararEdicao(id) {
   
   document.getElementById('btn-add-text').textContent = 'Salvar Alterações';
   document.getElementById('btn-cancel-edit').style.display = 'inline-block';
+  try {
+    const anchor = document.getElementById('form-cardapio-titulo') || document.getElementById('f-nome');
+    anchor?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  } catch {}
 }
 
 function _cancelarEdicao() {
   editandoId = null;
   document.getElementById('f-nome').value = '';
   if (document.getElementById('f-imagem')) document.getElementById('f-imagem').value = '';
+  if (document.getElementById('f-cat')) {
+    const sel = document.getElementById('f-cat');
+    if (sel && sel.options && sel.options.length) sel.value = sel.options[0].value;
+  }
   document.getElementById('f-preco').value = '';
   if (document.getElementById('f-tipo')) document.getElementById('f-tipo').value = 'produto';
   if (document.getElementById('f-somente-online')) { document.getElementById('f-somente-online').checked = false; document.getElementById('f-somente-online').disabled = false; }
@@ -3934,6 +3943,15 @@ function _cancelarEdicao() {
   if (document.getElementById('f-subcat')) document.getElementById('f-subcat').value = '';
   document.getElementById('btn-add-text').textContent = 'Adicionar';
   document.getElementById('btn-cancel-edit').style.display = 'none';
+}
+
+function _limparCadastro() {
+  _cancelarEdicao();
+  try {
+    renderSubcategorias(store.getState());
+    const anchor = document.getElementById('form-cardapio-titulo') || document.getElementById('f-nome');
+    anchor?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  } catch {}
 }
 
 function _removerMesa(id) {

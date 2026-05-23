@@ -49,8 +49,8 @@ export default function MenuScreen({ state, store }) {
         ) : (
           produtos.map((p, i) => {
             const nivel = nivelEstoque(p.estoque, p.estoqueMinimo ?? 5);
-            const badgeBg = nivel === 'ok' ? '#EAF3DE' : nivel === 'baixo' ? '#FAEEDA' : '#FCEBEB';
-            const badgeFg = nivel === 'ok' ? '#3B6D11' : nivel === 'baixo' ? '#BA7517' : '#A32D2D';
+            const badgeBg = '#fff';
+            const badgeFg = '#000';
             return (
               <View key={p.id} style={[styles.itemRow, i === produtos.length - 1 && { borderBottomWidth: 0 }]}>
                 {p.imagem ? (
@@ -70,7 +70,7 @@ export default function MenuScreen({ state, store }) {
                   <Text style={styles.itemPreco}>{(p.cat || '')}{p.subcat ? ` · ${p.subcat}` : ''} · {formatBRL(p.preco)}</Text>
                 </View>
                 <View style={[styles.badge, { backgroundColor: badgeBg }]}>
-                  <Text style={{ fontSize: 11, fontWeight: '800', color: badgeFg }}>
+                  <Text style={{ fontSize: 11, fontWeight: '900', color: badgeFg }}>
                     {p.estoque} un
                   </Text>
                 </View>
@@ -98,48 +98,40 @@ export default function MenuScreen({ state, store }) {
 }
 
 const styles = StyleSheet.create({
-  screen:    { flex: 1, padding: 16, backgroundColor: 'transparent' },
+  screen:    { flex: 1, padding: 16, backgroundColor: '#fff' },
   header: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 },
-  title:     { fontSize: 16, fontWeight: '900', color: '#2B1D0E', letterSpacing: 0.8, textTransform: 'uppercase' },
-  subtitle: { fontSize: 12, color: '#6D5A49', fontWeight: '700' },
+  title:     { fontSize: 16, fontWeight: '900', color: '#000', letterSpacing: 1.0, textTransform: 'uppercase' },
+  subtitle: { fontSize: 12, color: '#000', fontWeight: '800' },
   card:      {
-    backgroundColor: '#FFF8EF',
+    backgroundColor: '#fff',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#D8C3A5',
-    padding: 14,
-    shadowColor: '#2B1D0E',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    borderColor: '#111',
+    padding: 16,
+    elevation: 0,
   },
-  pickerWrap:{ borderWidth: 1, borderColor: '#D8C3A5', borderRadius: 8, marginBottom: 8, overflow: 'hidden', backgroundColor: '#FFF8EF' },
+  pickerWrap:{ borderWidth: 1, borderColor: '#111', borderRadius: 8, marginBottom: 12, overflow: 'hidden', backgroundColor: '#fff' },
   picker:    { height: 52, width: '100%' },
-  input:     { borderWidth: 1, borderColor: '#D8C3A5', borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 8, fontFamily: 'System', backgroundColor: '#FFF' },
-  itemRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f0ede6' },
-  itemImg: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#D8C3A5' },
-  itemImgPh: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#D8C3A5', alignItems: 'center', justifyContent: 'center' },
-  itemImgPhTxt: { color: '#7B6A5B', fontSize: 14, fontWeight: '800' },
-  itemNome:  { fontSize: 13, fontWeight: '900', color: '#2B1D0E' },
-  itemPreco: { fontSize: 12, color: '#6D5A49', fontWeight: '700' },
-  badge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
-  emptyMsg: { textAlign: 'center', color: '#7B6A5B', fontSize: 13, paddingVertical: 12, fontWeight: '700' },
+  input:     { borderWidth: 1, borderColor: '#111', borderRadius: 8, padding: 12, fontSize: 13, marginBottom: 12, backgroundColor: '#fff' },
+  itemRow:   { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#111' },
+  itemImg: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#111' },
+  itemImgPh: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  itemImgPhTxt: { color: '#000', fontSize: 14, fontWeight: '900' },
+  itemNome:  { fontSize: 13, fontWeight: '900', color: '#000' },
+  itemPreco: { fontSize: 12, color: '#000', fontWeight: '800' },
+  badge:     { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: '#111', backgroundColor: '#fff' },
+  emptyMsg: { textAlign: 'center', color: '#000', fontSize: 13, paddingVertical: 18, fontWeight: '900' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 18 },
   modalCard: {
-    backgroundColor: '#FFF8EF',
+    backgroundColor: '#fff',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#D8C3A5',
-    padding: 14,
-    shadowColor: '#2B1D0E',
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 4,
+    borderColor: '#111',
+    padding: 16,
+    elevation: 0,
   },
-  modalTitle: { fontSize: 14, fontWeight: '900', marginBottom: 10, color: '#2B1D0E' },
-  modalImg: { width: '100%', height: 320, borderRadius: 10, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#D8C3A5', resizeMode: 'contain' },
-  btnPrimary: { backgroundColor: '#6B3E1E', borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginTop: 12 },
-  btnPrimaryText: { color: '#FFF8EF', fontWeight: '900' },
+  modalTitle: { fontSize: 14, fontWeight: '900', marginBottom: 12, color: '#000' },
+  modalImg: { width: '100%', height: 320, borderRadius: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#111', resizeMode: 'contain' },
+  btnPrimary: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#111', borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginTop: 14 },
+  btnPrimaryText: { color: '#000', fontWeight: '900' },
 });

@@ -5,7 +5,7 @@
  */
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, StyleSheet, SafeAreaView, StatusBar, Text, TouchableOpacity, Modal, Alert, TextInput, ImageBackground, Platform } from 'react-native';
+import { View, StyleSheet, SafeAreaView, StatusBar, Text, TouchableOpacity, Modal, Alert, TextInput, Platform } from 'react-native';
 import { criarStore } from './core/store';
 import { Picker } from '@react-native-picker/picker';
 
@@ -22,9 +22,22 @@ import BottomNav from './components/BottomNav';
 
 // Cria o store uma única vez para toda a aplicação
 const store = criarStore();
-const FUNDO_IMG = require('./web/assets/fundo.jpeg');
+const _ensureGlobalTextDefaults = () => {
+  try {
+    if (globalThis.__BARAPP_TEXT_DEFAULTS__) return;
+    globalThis.__BARAPP_TEXT_DEFAULTS__ = true;
+    Text.defaultProps = Text.defaultProps || {};
+    const cur = Text.defaultProps.style;
+    Text.defaultProps.style = [{ color: '#000', textTransform: 'uppercase', letterSpacing: 0.8, lineHeight: 20 }, cur].filter(Boolean);
+    TextInput.defaultProps = TextInput.defaultProps || {};
+    const curIn = TextInput.defaultProps.style;
+    TextInput.defaultProps.style = [{ color: '#000', textTransform: 'uppercase', letterSpacing: 0.8 }, curIn].filter(Boolean);
+    if (!TextInput.defaultProps.placeholderTextColor) TextInput.defaultProps.placeholderTextColor = '#000';
+  } catch {}
+};
 
 export default function App() {
+  _ensureGlobalTextDefaults();
   const [tabAtiva, setTabAtiva] = useState('pedidos');
   const [state, setState]       = useState(store.getState());
   const [trocarUserAberto, setTrocarUserAberto] = useState(false);
@@ -108,16 +121,11 @@ export default function App() {
   };
 
   const perfilAtivo = store.getPerfilAcesso(state.usuarioAtivo?.papel);
-  const fundoOpacidade = (() => {
-    const v = Number(state.aparencia?.fundoOpacidade);
-    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.90;
-  })();
 
   return (
-    <ImageBackground source={FUNDO_IMG} style={styles.bg} imageStyle={styles.bgImg}>
-      <View style={[styles.bgOverlay, { backgroundColor: `rgba(246, 239, 227, ${fundoOpacidade})` }]} pointerEvents="none" />
+    <View style={styles.bg}>
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#FFF8EF" />
+        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
         <View style={styles.topBar}>
           <View style={{ flex: 1 }}>
             <Text style={styles.topBarTitle}>{state.usuarioAtivo?.nome || 'Usuário'}</Text>
@@ -170,61 +178,51 @@ export default function App() {
           </View>
         </Modal>
       </SafeAreaView>
-    </ImageBackground>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bg: { flex: 1 },
-  bgImg: { resizeMode: 'cover' },
-  bgOverlay: { ...StyleSheet.absoluteFillObject },
+  bg: { flex: 1, backgroundColor: '#fff' },
 
-  container: { flex: 1, backgroundColor: 'transparent' },
-  content:   { flex: 1, backgroundColor: 'transparent' },
+  container: { flex: 1, backgroundColor: '#fff' },
+  content:   { flex: 1, backgroundColor: '#fff' },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#FFF8EF',
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#D8C3A5',
+    borderBottomColor: '#111',
     paddingHorizontal: 16,
     paddingTop: (Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0) + 10,
     paddingBottom: 10,
-    shadowColor: '#2B1D0E',
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    elevation: 0,
   },
-  topBarTitle: { fontSize: 14, fontWeight: '800', color: '#2B1D0E' },
-  topBarSub: { fontSize: 12, color: '#6D5A49', marginTop: 2 },
-  topBarBtn: { borderWidth: 1, borderColor: '#D8C3A5', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#F2E7D3' },
-  topBarBtnText: { fontSize: 12, fontWeight: '800', color: '#2B1D0E' },
+  topBarTitle: { fontSize: 14, fontWeight: '900', color: '#000' },
+  topBarSub: { fontSize: 12, color: '#000', marginTop: 2 },
+  topBarBtn: { borderWidth: 1, borderColor: '#111', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#fff' },
+  topBarBtnText: { fontSize: 12, fontWeight: '900', color: '#000' },
 
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 18 },
   modalCard: {
-    backgroundColor: '#FFF8EF',
+    backgroundColor: '#fff',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#D8C3A5',
+    borderColor: '#111',
     padding: 14,
-    shadowColor: '#2B1D0E',
-    shadowOpacity: 0.10,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 4,
+    elevation: 0,
   },
-  modalTitle: { fontSize: 14, fontWeight: '900', marginBottom: 10, color: '#2B1D0E' },
-  pickerWrap: { borderWidth: 1, borderColor: '#D8C3A5', borderRadius: 8, marginBottom: 12, overflow: 'hidden', backgroundColor: '#FFF8EF' },
+  modalTitle: { fontSize: 14, fontWeight: '900', marginBottom: 10, color: '#000' },
+  pickerWrap: { borderWidth: 1, borderColor: '#111', borderRadius: 8, marginBottom: 12, overflow: 'hidden', backgroundColor: '#fff' },
   picker: { height: 52, width: '100%' },
-  modalInput: { borderWidth: 1, borderColor: '#D8C3A5', borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, backgroundColor: '#FFF' },
+  modalInput: { borderWidth: 1, borderColor: '#111', borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12, backgroundColor: '#fff' },
   modalRow: { flexDirection: 'row', gap: 10 },
   modalBtn: { flex: 1, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
-  modalBtnPrimary: { backgroundColor: '#6B3E1E' },
-  modalBtnPrimaryText: { color: '#FFF8EF', fontWeight: '900' },
-  modalBtnGhost: { borderWidth: 1, borderColor: '#D8C3A5', backgroundColor: '#F2E7D3' },
-  modalBtnGhostText: { color: '#2B1D0E', fontWeight: '900' },
+  modalBtnPrimary: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#111' },
+  modalBtnPrimaryText: { color: '#000', fontWeight: '900' },
+  modalBtnGhost: { borderWidth: 1, borderColor: '#111', backgroundColor: '#fff' },
+  modalBtnGhostText: { color: '#000', fontWeight: '900' },
   locked: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  lockedText: { fontSize: 14, fontWeight: '800', color: '#6D5A49' },
+  lockedText: { fontSize: 14, fontWeight: '900', color: '#000' },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -44,13 +44,14 @@ export default function CadastrosScreen({ state, store }) {
   const [aba, setAba] = useState('produtos');
   const tabsAcesso = store.getPerfilAcesso(state.usuarioAtivo?.papel)?.tabs || {};
   const podeParametros = !!tabsAcesso.parametros;
+  const scrollRef = useRef(null);
 
   useEffect(() => {
     if (aba === 'parametros' && !podeParametros) setAba('produtos');
   }, [aba, podeParametros]);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 24 }}>
+    <ScrollView ref={scrollRef} style={styles.screen} contentContainerStyle={{ paddingBottom: 24 }}>
       <View style={styles.header}>
         <Text style={styles.title}>Cadastros</Text>
       </View>
@@ -66,7 +67,7 @@ export default function CadastrosScreen({ state, store }) {
         )}
       </ScrollView>
 
-      {aba === 'produtos' && <ProdutosSection state={state} store={store} />}
+      {aba === 'produtos' && <ProdutosSection state={state} store={store} scrollRef={scrollRef} />}
       {aba === 'categorias' && <CategoriasSection state={state} store={store} />}
       {aba === 'subcats' && <SubcategoriasSection state={state} store={store} />}
       {aba === 'mesas' && <MesasSection state={state} store={store} />}
@@ -925,7 +926,7 @@ function CategoriasSection({ state, store }) {
   );
 }
 
-function ProdutosSection({ state, store }) {
+function ProdutosSection({ state, store, scrollRef }) {
   const cats = useMemo(() => {
     const base = Array.isArray(state.categorias) && state.categorias.length
       ? state.categorias
@@ -968,6 +969,9 @@ function ProdutosSection({ state, store }) {
     setPreco(String(p.preco ?? ''));
     setEstoque(String(p.estoque ?? ''));
     setEstoqueMinimo(String(p.estoqueMinimo ?? '5'));
+    try {
+      scrollRef?.current?.scrollTo?.({ y: 0, animated: true });
+    } catch {}
   }
 
   function salvar() {
@@ -1053,9 +1057,13 @@ function ProdutosSection({ state, store }) {
         <TouchableOpacity style={styles.btnPrimary} onPress={salvar} activeOpacity={0.8}>
           <Text style={styles.btnPrimaryText}>{editandoId ? 'Salvar' : 'Adicionar'}</Text>
         </TouchableOpacity>
-        {editandoId && (
+        {editandoId ? (
           <TouchableOpacity style={styles.btnGhost} onPress={resetForm} activeOpacity={0.8}>
             <Text style={styles.btnGhostText}>Cancelar</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.btnGhost} onPress={resetForm} activeOpacity={0.8}>
+            <Text style={styles.btnGhostText}>Limpar cadastro</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -1579,66 +1587,62 @@ function PerfisSection({ state, store }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, padding: 16, backgroundColor: 'transparent' },
+  screen: { flex: 1, padding: 16, backgroundColor: '#fff' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  title: { fontSize: 16, fontWeight: '900', color: '#2B1D0E', letterSpacing: 0.8, textTransform: 'uppercase' },
+  title: { fontSize: 16, fontWeight: '900', color: '#000', letterSpacing: 1.0, textTransform: 'uppercase' },
 
   tabsRow: { marginBottom: 12 },
   tabBtn: {
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#D8C3A5',
-    backgroundColor: '#FFF8EF',
-    marginRight: 8,
+    borderColor: '#111',
+    backgroundColor: '#fff',
+    marginRight: 10,
   },
-  tabBtnAtiva: { backgroundColor: '#6B3E1E', borderColor: '#6B3E1E' },
-  tabTxt: { fontSize: 12, fontWeight: '800', color: '#6D5A49' },
-  tabTxtAtiva: { color: '#fff' },
+  tabBtnAtiva: { backgroundColor: '#fff', borderColor: '#000' },
+  tabTxt: { fontSize: 12, fontWeight: '900', color: '#000' },
+  tabTxtAtiva: { color: '#000' },
 
   card: {
-    backgroundColor: '#FFF8EF',
+    backgroundColor: '#fff',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#D8C3A5',
-    padding: 14,
-    shadowColor: '#2B1D0E',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    borderColor: '#111',
+    padding: 16,
+    elevation: 0,
   },
-  sectionTitle: { fontSize: 14, fontWeight: '900', marginBottom: 10, color: '#2B1D0E', letterSpacing: 0.8, textTransform: 'uppercase' },
-  input: { borderWidth: 1, borderColor: '#D8C3A5', borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 8, backgroundColor: '#FFF' },
-  pickerWrap: { borderWidth: 1, borderColor: '#D8C3A5', borderRadius: 8, marginBottom: 8, overflow: 'hidden', backgroundColor: '#FFF8EF' },
+  sectionTitle: { fontSize: 14, fontWeight: '900', marginBottom: 14, color: '#000', letterSpacing: 1.0, textTransform: 'uppercase' },
+  input: { borderWidth: 1, borderColor: '#111', borderRadius: 8, padding: 12, fontSize: 13, marginBottom: 12, backgroundColor: '#fff' },
+  pickerWrap: { borderWidth: 1, borderColor: '#111', borderRadius: 8, marginBottom: 12, overflow: 'hidden', backgroundColor: '#fff' },
   picker: { height: 52, width: '100%' },
-  row: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  row: { flexDirection: 'row', gap: 12, alignItems: 'center' },
 
-  btnPrimary: { backgroundColor: '#6B3E1E', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', flex: 1 },
-  btnPrimaryText: { color: '#FFF8EF', fontWeight: '900' },
-  btnGhost: { borderWidth: 1, borderColor: '#D8C3A5', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', flex: 1, backgroundColor: '#F2E7D3' },
-  btnGhostText: { color: '#2B1D0E', fontWeight: '900' },
-  btnDangerText: { color: '#A32D2D', fontWeight: '800' },
-  btnMini: { borderWidth: 1, borderColor: '#D8C3A5', borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#F2E7D3' },
-  btnMiniText: { fontSize: 12, fontWeight: '700', color: '#A32D2D' },
+  btnPrimary: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#111', borderRadius: 8, paddingVertical: 12, paddingHorizontal: 12, alignItems: 'center', flex: 1 },
+  btnPrimaryText: { color: '#000', fontWeight: '900' },
+  btnGhost: { borderWidth: 1, borderColor: '#111', borderRadius: 8, paddingVertical: 12, paddingHorizontal: 12, alignItems: 'center', flex: 1, backgroundColor: '#fff' },
+  btnGhostText: { color: '#000', fontWeight: '900' },
+  btnDangerText: { color: '#000', fontWeight: '900' },
+  btnMini: { borderWidth: 1, borderColor: '#111', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: '#fff' },
+  btnMiniText: { fontSize: 12, fontWeight: '900', color: '#000' },
 
   list: { marginTop: 10 },
-  listRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#e9dcc8' },
-  listTitle: { fontSize: 13, fontWeight: '900', color: '#2B1D0E' },
-  listSub: { fontSize: 12, color: '#6D5A49', marginTop: 2, fontWeight: '700' },
-  badge: { backgroundColor: '#F1EFE8', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  badgeText: { fontSize: 11, fontWeight: '700', color: '#666' },
-  badgeAtivo: { backgroundColor: '#6B3E1E', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  badgeAtivoText: { fontSize: 11, fontWeight: '700', color: '#fff' },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#111' },
+  listTitle: { fontSize: 13, fontWeight: '900', color: '#000' },
+  listSub: { fontSize: 12, color: '#000', marginTop: 4, fontWeight: '800' },
+  badge: { backgroundColor: '#fff', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#111' },
+  badgeText: { fontSize: 11, fontWeight: '900', color: '#000' },
+  badgeAtivo: { backgroundColor: '#fff', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#111' },
+  badgeAtivoText: { fontSize: 11, fontWeight: '900', color: '#000' },
   iconBtn: { paddingHorizontal: 6, paddingVertical: 4 },
   iconBtnText: { fontSize: 16 },
-  emptyMsg: { textAlign: 'center', color: '#7B6A5B', fontSize: 13, paddingVertical: 12, fontWeight: '700' },
+  emptyMsg: { textAlign: 'center', color: '#000', fontSize: 13, paddingVertical: 18, fontWeight: '900' },
 
-  perfilRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f0ede6' },
-  perfilLabel: { fontSize: 13, fontWeight: '900', color: '#2B1D0E' },
+  perfilRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#111' },
+  perfilLabel: { fontSize: 13, fontWeight: '900', color: '#000' },
 
   configRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
-  configLabel: { fontSize: 13, fontWeight: '900', color: '#2B1D0E' },
-  configHint: { marginTop: 10, color: '#6D5A49', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  configLabel: { fontSize: 13, fontWeight: '900', color: '#000' },
+  configHint: { marginTop: 12, color: '#000', fontSize: 12, lineHeight: 18, fontWeight: '800' },
 });
