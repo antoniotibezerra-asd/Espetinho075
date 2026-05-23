@@ -5,7 +5,7 @@
  */
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, StyleSheet, SafeAreaView, StatusBar, Text, TouchableOpacity, Modal, Alert, TextInput, Platform } from 'react-native';
+import { View, StyleSheet, SafeAreaView, StatusBar, Text, TouchableOpacity, Modal, Alert, TextInput, Platform, Image } from 'react-native';
 import { criarStore } from './core/store';
 import { Picker } from '@react-native-picker/picker';
 
@@ -22,6 +22,7 @@ import BottomNav from './components/BottomNav';
 
 // Cria o store uma única vez para toda a aplicação
 const store = criarStore();
+const CAPA_IMG = require('./web/assets/logo-espetinho.jpg');
 const _ensureGlobalTextDefaults = () => {
   try {
     if (globalThis.__BARAPP_TEXT_DEFAULTS__) return;
@@ -127,6 +128,7 @@ export default function App() {
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor="#fff" />
         <View style={styles.topBar}>
+          <Image source={CAPA_IMG} style={styles.brandImg} />
           <View style={{ flex: 1 }}>
             <Text style={styles.topBarTitle}>{state.usuarioAtivo?.nome || 'Usuário'}</Text>
             <Text style={styles.topBarSub}>{perfilAtivo?.label || state.usuarioAtivo?.papel || ''}</Text>
@@ -147,6 +149,7 @@ export default function App() {
         <Modal visible={trocarUserAberto} transparent animationType="fade" onRequestClose={() => setTrocarUserAberto(false)}>
           <View style={styles.modalBackdrop}>
             <View style={styles.modalCard}>
+              <Image source={CAPA_IMG} style={styles.modalBrandImg} />
               <Text style={styles.modalTitle}>Trocar Usuário</Text>
               <View style={styles.pickerWrap}>
                 <Picker selectedValue={userIdSelecionado} onValueChange={setUserIdSelecionado} style={styles.picker}>
@@ -199,6 +202,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     elevation: 0,
   },
+  brandImg: { width: 44, height: 44, borderRadius: 10, borderWidth: 1, borderColor: '#111', backgroundColor: '#fff' },
   topBarTitle: { fontSize: 14, fontWeight: '900', color: '#000' },
   topBarSub: { fontSize: 12, color: '#000', marginTop: 2 },
   topBarBtn: { borderWidth: 1, borderColor: '#111', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#fff' },
@@ -213,6 +217,7 @@ const styles = StyleSheet.create({
     padding: 14,
     elevation: 0,
   },
+  modalBrandImg: { width: '100%', height: 68, borderRadius: 10, borderWidth: 1, borderColor: '#111', backgroundColor: '#fff', marginBottom: 12, resizeMode: 'cover' },
   modalTitle: { fontSize: 14, fontWeight: '900', marginBottom: 10, color: '#000' },
   pickerWrap: { borderWidth: 1, borderColor: '#111', borderRadius: 8, marginBottom: 12, overflow: 'hidden', backgroundColor: '#fff' },
   picker: { height: 52, width: '100%' },

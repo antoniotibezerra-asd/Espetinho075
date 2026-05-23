@@ -4,10 +4,10 @@
     "slug": "espetinho-075",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./web/assets/logo.jpg",
+    "icon": "./web/assets/logo-espetinho.jpg",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./web/assets/logo.jpg",
+      "image": "./web/assets/logo-espetinho.jpg",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -19,12 +19,12 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./web/assets/logo.jpg",
+        "foregroundImage": "./web/assets/logo-espetinho.jpg",
         "backgroundColor": "#ffffff"
       }
     },
     "web": {
-      "favicon": "./web/assets/logo.jpg"
+      "favicon": "./web/assets/logo-espetinho.jpg"
     }
   }
 }
