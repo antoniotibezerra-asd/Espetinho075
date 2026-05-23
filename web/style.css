@@ -596,7 +596,7 @@ body.cliente-mode .c-shell {
 }
 
 body.cliente-mode .c-hero {
-  height: 160px;
+  height: 220px;
   background: #fff;
   background-size: cover;
   background-position: center;
@@ -634,6 +634,13 @@ body.cliente-mode .c-search {
   border: var(--border);
 }
 
+@media (max-width: 520px) {
+  body.cliente-mode .c-hero { height: 260px; }
+  body.cliente-mode .c-hero-inner { padding-top: 18px; }
+  body.cliente-mode .c-store { margin-top: -64px; }
+  body.cliente-mode .c-store-logo { width: 86px; height: 86px; margin-top: -62px; }
+}
+
 body.cliente-mode .c-search input {
   border: none;
   outline: none;
@@ -649,31 +656,33 @@ body.cliente-mode .c-wrap {
 }
 
 body.cliente-mode .c-store {
-  margin-top: -26px;
+  margin-top: -54px;
 }
 
 body.cliente-mode .c-store-card {
   background: #fff;
   border: var(--border);
   border-radius: 12px;
-  padding: 12px;
+  padding: 14px;
   box-shadow: none;
+  position: relative;
 }
 
 body.cliente-mode .c-store-head {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-end;
+  gap: 14px;
 }
 
 body.cliente-mode .c-store-logo {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
+  width: 78px;
+  height: 78px;
+  border-radius: 999px;
   object-fit: cover;
-  border: var(--border);
+  border: 2px solid #111;
   background: #fff;
   flex-shrink: 0;
+  margin-top: -54px;
 }
 
 body.cliente-mode .c-store-meta {
