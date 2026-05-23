@@ -2224,14 +2224,20 @@ function _bootClienteMode() {
 
     root.innerHTML = `
       <div class="c-shell">
-        <div class="c-hero" style="background-image:url('${heroUrl.replace(/"/g, '&quot;')}')">
-          <div class="c-hero-inner">
-            <div class="c-search">
-              <span style="font-weight:900">🔎</span>
-              <input id="cliente-busca" type="search" placeholder="Buscar no cardápio" value="${String(q || '').replace(/"/g, '&quot;')}" />
-            </div>
+        <div class="c-topbar">
+          <img class="c-toplogo" src="/assets/logo-espetinho.jpg" alt="" onerror="this.style.display='none'">
+          <div class="c-search">
+            <span style="font-weight:900">🔎</span>
+            <input id="cliente-busca" type="search" placeholder="Buscar no cardápio" value="${String(q || '').replace(/"/g, '&quot;')}" />
+          </div>
+          <div class="c-topnav" id="c-topnav">
+            <button class="c-topbtn ${navTab === 'home' ? 'active' : ''}" data-tab="home"><span class="c-ico">⌂</span><span>Início</span></button>
+            <button class="c-topbtn ${navTab === 'orders' ? 'active' : ''}" data-tab="orders"><span class="c-ico">🧾</span><span>Pedidos</span></button>
+            <button class="c-topbtn ${navTab === 'profile' ? 'active' : ''}" data-tab="profile"><span class="c-ico">👤</span><span>Perfil</span></button>
           </div>
         </div>
+
+        <div class="c-hero" style="background-image:url('${heroUrl.replace(/"/g, '&quot;')}')"></div>
 
         <div class="c-wrap c-store">
           <div class="c-store-card">
@@ -2278,8 +2284,8 @@ function _bootClienteMode() {
     const btnLogout = root.querySelector('#c-logout');
     if (btnLogout) btnLogout.addEventListener('click', _logout);
 
-    const navEl = root.querySelector('#c-bottomnav');
-    if (navEl) {
+    const navEls = root.querySelectorAll('#c-bottomnav, #c-topnav');
+    navEls.forEach((navEl) => {
       navEl.addEventListener('click', async (e) => {
         const b = e.target.closest('button[data-tab]');
         if (!b) return;
@@ -2289,7 +2295,7 @@ function _bootClienteMode() {
         if (navTab === 'orders' && isOnlineFlow && authToken) await _loadPedidos();
         renderCliente();
       });
-    }
+    });
 
     const btnOpenBag = root.querySelector('#c-open-bag');
     if (btnOpenBag) {
