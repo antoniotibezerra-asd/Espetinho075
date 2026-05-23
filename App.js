@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     elevation: 0,
   },
-  brandImg: { width: 44, height: 44, borderRadius: 10, borderWidth: 1, borderColor: '#111', backgroundColor: '#fff' },
+  brandImg: { width: 120, height: 34, borderRadius: 10, borderWidth: 1, borderColor: '#111', backgroundColor: '#fff', resizeMode: 'cover' },
   topBarTitle: { fontSize: 14, fontWeight: '900', color: '#000' },
   topBarSub: { fontSize: 12, color: '#000', marginTop: 2 },
   topBarBtn: { borderWidth: 1, borderColor: '#111', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#fff' },
