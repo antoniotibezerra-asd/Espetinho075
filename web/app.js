@@ -2050,6 +2050,22 @@ function _bootClienteMode() {
       </div>
     `;
 
+    const cartRowsHtml = cartDetalhes.length
+      ? cartDetalhes.map(it => `
+          <div class="item-row">
+            <div class="item-info">
+              <div class="item-nome">${it.nome}</div>
+              <div class="item-preco">${formatBRL(it.preco)} · ${it.qty}x</div>
+            </div>
+            <div class="row" style="gap:6px">
+              <button class="qty-btn" data-act="dec" data-id="${it.id}">−</button>
+              <button class="qty-btn" data-act="inc" data-id="${it.id}">+</button>
+              <button class="remove-btn" data-act="rm" data-id="${it.id}">×</button>
+            </div>
+          </div>
+        `).join('')
+      : `<div class="empty-msg" style="padding:10px 0">Sacola vazia</div>`;
+
     const sheetHtml = bagOpen ? `
       <div class="c-sheet-backdrop" id="c-sheet">
         <div class="c-sheet" role="dialog" aria-modal="true">
@@ -2060,28 +2076,11 @@ function _bootClienteMode() {
 
           ${isOnlineFlow ? `
             <div style="margin-top:12px">
-              <button class="c-action" id="c-calc-delivery">Calcular taxa de entrega</button>
+              <button class="c-action js-calc-delivery" type="button">Calcular taxa de entrega</button>
             </div>
           ` : ''}
 
-          <div style="margin-top:12px" id="cliente-cart">
-            ${cartDetalhes.length
-              ? cartDetalhes.map(it => `
-                  <div class="item-row">
-                    <div class="item-info">
-                      <div class="item-nome">${it.nome}</div>
-                      <div class="item-preco">${formatBRL(it.preco)} · ${it.qty}x</div>
-                    </div>
-                    <div class="row" style="gap:6px">
-                      <button class="qty-btn" data-act="dec" data-id="${it.id}">−</button>
-                      <button class="qty-btn" data-act="inc" data-id="${it.id}">+</button>
-                      <button class="remove-btn" data-act="rm" data-id="${it.id}">×</button>
-                    </div>
-                  </div>
-                `).join('')
-              : `<div class="empty-msg" style="padding:10px 0">Sacola vazia</div>`
-            }
-          </div>
+          <div style="margin-top:12px" id="cliente-cart-sheet">${cartRowsHtml}</div>
 
           <div style="margin-top:12px">
             <button class="c-muted-btn" id="c-add-more">Adicionar mais itens</button>
@@ -2167,7 +2166,7 @@ function _bootClienteMode() {
               ` : ''}
 
               <div class="row" style="gap:10px; margin-top:12px; flex-wrap:wrap">
-                <button class="btn" id="cliente-limpar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Limpar</button>
+                <button class="btn js-cart-clear" id="cliente-limpar" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Limpar</button>
                 ${canSeeWizard ? `
                   ${step === 'menu' ? `<button class="c-primary-btn" id="c-next-menu" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.45"'}>Continuar pedido</button>` : ''}
                   ${step === 'delivery' ? `<button class="c-primary-btn" id="c-next-delivery" style="flex:1" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.45"'}>Ir para pagamento</button>` : ''}
@@ -2237,27 +2236,65 @@ function _bootClienteMode() {
           </div>
         </div>
 
-        <div class="c-hero" style="background-image:url('${heroUrl.replace(/"/g, '&quot;')}')"></div>
+        <div class="c-page">
+          <div class="c-left">
+            <div class="c-hero" style="background-image:url('${heroUrl.replace(/"/g, '&quot;')}')"></div>
 
-        <div class="c-wrap c-store">
-          <div class="c-store-card">
-            <div class="c-store-head">
-              <img class="c-store-logo" src="/assets/logo-espetinho.jpg" alt="" onerror="this.style.display='none'">
-              <div class="c-store-meta">
-                <div class="c-store-name">${empresaNome}</div>
-                <div class="c-store-sub">${storeAddr ? storeAddr : _tituloMesa()}</div>
+            <div class="c-wrap c-store">
+              <div class="c-store-card">
+                <div class="c-store-head">
+                  <img class="c-store-logo" src="/assets/logo-espetinho.jpg" alt="" onerror="this.style.display='none'">
+                  <div class="c-store-meta">
+                    <div class="c-store-name">${empresaNome}</div>
+                    <div class="c-store-sub">${storeAddr ? storeAddr : _tituloMesa()}</div>
+                  </div>
+                </div>
+                ${isOnlineFlow ? `
+                  <div class="c-action-row">
+                    <button class="c-action js-calc-delivery" type="button">Calcular taxa de entrega</button>
+                  </div>
+                ` : ''}
               </div>
             </div>
-            ${isOnlineFlow ? `
-              <div class="c-action-row">
-                <button class="c-action" id="c-calc-delivery">Calcular taxa de entrega</button>
-              </div>
-            ` : ''}
-          </div>
-        </div>
 
-        <div class="c-wrap" style="padding-top:12px; padding-bottom:16px">
-          ${navTab === 'home' ? homeHtml : (navTab === 'orders' ? ordersHtml : profileHtml)}
+            <div class="c-wrap" style="padding-top:12px; padding-bottom:16px">
+              ${navTab === 'home' ? homeHtml : (navTab === 'orders' ? ordersHtml : profileHtml)}
+            </div>
+          </div>
+
+          <div class="c-right">
+            <div class="c-cartpanel">
+              ${isOnlineFlow ? `
+                <button class="c-action js-calc-delivery" type="button">Calcular taxa de entrega</button>
+              ` : ''}
+
+              <div class="c-cartpanel-head">
+                <div class="c-cartpanel-title">Sua sacola</div>
+                <button class="c-cartpanel-clear js-cart-clear" type="button" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.4"'}>Limpar</button>
+              </div>
+
+              <div id="cliente-cart-panel">${cartRowsHtml}</div>
+
+              <div class="c-totals">
+                <div class="row"><span>Subtotal</span><span>${formatBRL(subtotalCart)}</span></div>
+                <div class="row" style="opacity:${taxaEntregaEfetiva > 0 ? '1' : '0.6'}"><span>Taxa de entrega</span><span>${formatBRL(taxaEntregaEfetiva)}</span></div>
+                <div class="row" style="font-weight:900; font-size:16px; color:#111; margin-top:8px"><span>Total</span><span>${formatBRL(totalFinal)}</span></div>
+              </div>
+
+              ${isOnlineFlow ? `
+                <div style="margin-top:12px">
+                  <div class="simple-item">
+                    <span>Tem um cupom?<br><span style="color:#777; font-size:12px">Clique e insira o código</span></span>
+                    <span>›</span>
+                  </div>
+                </div>
+              ` : ''}
+
+              <div style="margin-top:12px">
+                <button class="c-primary-btn" id="c-cart-continue" type="button" ${cartDetalhes.length ? '' : 'disabled style="opacity:0.45"'}>Continuar pedido</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         ${showCartBar ? `
@@ -2284,7 +2321,7 @@ function _bootClienteMode() {
     const btnLogout = root.querySelector('#c-logout');
     if (btnLogout) btnLogout.addEventListener('click', _logout);
 
-    const navEls = root.querySelectorAll('#c-bottomnav, #c-topnav');
+        const navEls = root.querySelectorAll('#c-bottomnav, #c-topnav');
     navEls.forEach((navEl) => {
       navEl.addEventListener('click', async (e) => {
         const b = e.target.closest('button[data-tab]');
@@ -2334,11 +2371,21 @@ function _bootClienteMode() {
       });
     }
 
-    const btnCalcDelivery = root.querySelector('#c-calc-delivery');
-    if (btnCalcDelivery) {
+    const btnsCalcDelivery = root.querySelectorAll('.js-calc-delivery');
+    btnsCalcDelivery.forEach((btnCalcDelivery) => {
       btnCalcDelivery.addEventListener('click', () => {
         if (isOnlineFlow && !mesaId && authToken) step = 'delivery';
         bagOpen = true;
+        renderCliente();
+      });
+    });
+
+    const btnCartContinue = root.querySelector('#c-cart-continue');
+    if (btnCartContinue) {
+      btnCartContinue.addEventListener('click', () => {
+        if (!itensCart.length) return;
+        bagOpen = true;
+        if (canSeeWizard && (step !== 'menu' && step !== 'delivery' && step !== 'payment')) step = 'menu';
         renderCliente();
       });
     }
@@ -2584,8 +2631,8 @@ function _bootClienteMode() {
       });
     }
 
-    const cartEl = root.querySelector('#cliente-cart');
-    if (cartEl) {
+    const cartEls = root.querySelectorAll('#cliente-cart-sheet, #cliente-cart-panel');
+    cartEls.forEach((cartEl) => {
       cartEl.addEventListener('click', (e) => {
         const btn = e.target.closest('button');
         if (!btn) return;
@@ -2603,16 +2650,16 @@ function _bootClienteMode() {
         status = '';
         renderCliente();
       });
-    }
+    });
 
-    const btnLimpar = root.querySelector('#cliente-limpar');
-    if (btnLimpar) {
+    const btnsLimpar = root.querySelectorAll('.js-cart-clear');
+    btnsLimpar.forEach((btnLimpar) => {
       btnLimpar.addEventListener('click', () => {
         cart.clear();
         status = '';
         renderCliente();
       });
-    }
+    });
 
     const btnNextMenu = root.querySelector('#c-next-menu');
     if (btnNextMenu) {
